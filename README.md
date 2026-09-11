@@ -78,16 +78,23 @@ already-loaded data, still works in every case).
 ## Ingesting data
 
 Drop in **CSV, TSV, or Excel (`.xlsx`/`.xls`)** files — one or more at once,
-mixed types and mixed platforms in the same drop are fine. Each file is
-routed through one of three paths, tried in order, and everything from the
-whole batch is merged into one dataset:
+mixed types and mixed platforms in the same drop are fine. Each non-Excel
+file is decoded first (UTF-8 or UTF-16, auto-detected — see "Format Mix
+exports" below), then routed through one of four paths, tried in order.
+Growth/funnel data from every matched file in the batch is merged into one
+dataset in a final pass; Format Mix data (see below) is kept entirely
+separate and never joins it:
 
-1. **Canonical schema** — the file already has `week` and `channel` columns
+1. **A Format Mix export** — a Meta/Instagram "Top content formats" file
+   (detected by its distinctive stacked-section shape, not a header row).
+   Routed to the separate **Format Mix** view, never the funnel — see
+   "Format Mix exports" below.
+2. **Canonical schema** — the file already has `week` and `channel` columns
    (see below). Used as-is.
-2. **A platform adapter** — the file's columns match a known raw export
+3. **A platform adapter** — the file's columns match a known raw export
    (see "Platform adapters" below). Detected automatically by column
    signature (with a filename hint as a tiebreaker) and reshaped to weekly.
-3. **Manual mapping** — neither of the above matched. Instead of failing,
+4. **Manual mapping** — none of the above matched. Instead of failing,
    the app shows a one-time mapping step: it lists the file's columns and
    lets you assign each to a canonical field (and type in a fixed
    channel/week if the file doesn't have those as columns). This is
@@ -155,6 +162,35 @@ on for detection) in that one block — nothing else in the app needs to
 change.** Until it's fixed, files from that platform still work; they just
 fall to the manual-mapping step.
 
+### Format Mix exports
+
+Meta/Instagram's **"Top content formats"** export answers a different
+question than everything else in this app: not *how is the audience
+growing*, but *which content formats earn attention*. It's handled
+separately from the funnel, on purpose:
+
+- It's usually **UTF-16 encoded**, with a `sep=,` hint line first — both
+  handled automatically (the app sniffs the byte-order-mark on every
+  non-Excel file and decodes accordingly, and strips the hint line before
+  parsing).
+- It isn't a single header-plus-rows grid — it's **three stacked
+  mini-tables** in one file (`Published content`, `Views`, `Content
+  interactions`, each a label row, a format-name row, then a values row).
+  The app recognizes this shape structurally and merges the three
+  sections into one record per format (Reels, Stories, Photo, …).
+- **It has no date column at all.** On import, you're asked to tag the
+  file with the week it covers (the same date-picker pattern as manual
+  mapping's week field). Re-tagging a file to a week you've already
+  loaded replaces that week's format mix rather than duplicating it, so
+  re-exporting the same period twice reconciles to one.
+- It never contains reach, followers, clicks, or sign-ups, so it **can
+  never feed the growth chart or funnel** — the app doesn't try. If it's
+  the only kind of file loaded, the Format Mix view says so explicitly
+  rather than leaving you to guess why the funnel looks empty.
+
+See "Format Mix" under "What the dashboard shows" below for what the view
+itself contains.
+
 ### Funnel
 
 `Reach → Engagement → Clicks → Sign-ups`, summed across the selected channels
@@ -215,6 +251,33 @@ reason this exists instead of the previous Looker Studio setup.
 - **Detail table** — per-channel numbers for the selected week, with totals.
 - **Filters** — toggle channels on/off (at least one stays selected) and
   pick the reporting week; both apply to every view above.
+
+## Format Mix
+
+A companion view, kept deliberately separate from the funnel above, fed by
+Meta/Instagram "Top content formats" exports (see "Format Mix exports"
+under "Ingesting data"). Pick a **period** (the week the file was tagged
+with on import) and it shows, for that period:
+
+- **Views by format** — a sorted bar per format. The headline number.
+- **Views per post** — views ÷ published, sorted separately. This is the
+  efficiency signal: a format that earns a lot from very few posts stands
+  out here even if its raw view count doesn't top the chart above.
+- **Published count and interactions** per format, alongside views and
+  views/post, in one table.
+- **A one-line, rule-based insight** — e.g. "Reels earned 75% of views
+  from a small share of posts; Stories were published most but drew the
+  fewest views per post." Same spirit as the PDF interpretation: plain
+  arithmetic over the numbers already shown, not a causal claim.
+- **A share-of-views comparison across periods** (once 2+ are loaded) —
+  e.g. watching Reels' share of views move week to week.
+
+If no Format Mix file has been loaded, this card says so. If growth/funnel
+data (the sections above) isn't loaded — only a Format Mix file is — this
+card says that explicitly too, rather than leaving the empty funnel
+unexplained: **Format Mix numbers are never used to fill in or imply
+reach, followers, clicks, or sign-ups.** The two views only ever share a
+page, never data.
 
 ## PDF report
 
