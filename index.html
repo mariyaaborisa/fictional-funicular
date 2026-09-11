@@ -183,6 +183,27 @@
 
   .empty-state { text-align: center; padding: 32px 16px; color: var(--text-secondary); }
 
+  .mapping-overlay {
+    position: fixed; inset: 0; background: rgba(11,11,11,0.5); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .mapping-panel {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto;
+  }
+  .mapping-panel h3 { margin-top: 0; }
+  .mapping-help { color: var(--text-secondary); font-size: 14px; margin-bottom: 16px; }
+  .mapping-grid { display: flex; flex-direction: column; gap: 10px; }
+  .mapping-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.4fr); gap: 8px; align-items: center; }
+  .mapping-row label { font-size: 13px; color: var(--text-secondary); }
+  .mapping-row select, .mapping-row input {
+    font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); width: 100%;
+  }
+  @media (max-width: 480px) {
+    .mapping-row { grid-template-columns: 1fr; }
+  }
+
   footer.app-footer {
     margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--gridline);
     font-size: 13px; color: var(--text-muted); max-width: 76ch;
@@ -222,10 +243,10 @@
   <section class="card" id="ingest">
     <h2>Import data</h2>
     <div id="dropzone">
-      Drag and drop CSV file(s) here, or
+      Drag and drop file(s) here, or
       <label for="fileInput">choose files</label>
-      <input type="file" id="fileInput" accept=".csv" multiple>
-      <div style="margin-top:10px; font-size:13px;">One row per channel × week. Missing columns read as 0/blank — see the schema in the README.</div>
+      <input type="file" id="fileInput" accept=".csv,.tsv,.xlsx,.xls" multiple>
+      <div style="margin-top:10px; font-size:13px;">CSV, TSV, or Excel (.xlsx/.xls). Raw exports from Meta/Facebook, Instagram, LinkedIn, Linktree, and Mailchimp-style newsletters are auto-detected and reshaped to weekly; anything else prompts a quick column-mapping step. See the README for the canonical schema.</div>
     </div>
     <div class="btn-row" style="margin-top:12px;">
       <button type="button" id="templateBtn">Download template CSV</button>
@@ -304,13 +325,22 @@
 <!-- CDLS-BUILD:LIBS-START -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <!-- CDLS-BUILD:LIBS-END -->
 <script>
 (function () {
   "use strict";
 
   // ---------- Data contract: header aliases ----------
-  var ALIASES = {
+  // Canonical schema (the ideal input): one row per channel x ISO week.
+  function buildAliasToField(defs) {
+    var out = {};
+    Object.keys(defs).forEach(function (field) {
+      defs[field].forEach(function (alias) { out[alias] = field; });
+    });
+    return out;
+  }
+  var CANONICAL_ALIASES = {
     week: ["week", "week_start", "date", "reporting_week", "week_of", "weekof"],
     channel: ["channel", "platform", "source", "network"],
     reach: ["reach"],
@@ -322,10 +352,7 @@
     form_submissions: ["form_submissions", "submissions", "responses", "response"],
     new_subscribers: ["new_subscribers", "new_subscriber", "signups", "sign_ups", "new_signups"]
   };
-  var ALIAS_TO_FIELD = {};
-  Object.keys(ALIASES).forEach(function (field) {
-    ALIASES[field].forEach(function (alias) { ALIAS_TO_FIELD[alias] = field; });
-  });
+  var CANONICAL_ALIAS_TO_FIELD = buildAliasToField(CANONICAL_ALIASES);
 
   var METRICS = [
     { key: "reach", label: "Reach" },
@@ -353,48 +380,239 @@
     return isNaN(n) ? 0 : n;
   }
   function isBlank(v) { return v === undefined || v === null || String(v).trim() === ""; }
-  function parseWeekISO(raw) {
-    if (isBlank(raw)) return null;
-    var s = String(raw).trim();
-    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return m[1] + "-" + m[2] + "-" + m[3];
-    var d = new Date(s);
-    if (isNaN(d.getTime())) return null;
-    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
-  }
   function formatWeekLabel(iso) {
     var d = new Date(iso + "T00:00:00Z");
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
   }
   function fmt(n) { return Math.round(n).toLocaleString("en-US"); }
 
-  function normalizeRows(rawRows) {
+  // Parses week/day values from canonical CSVs, platform exports (varied date
+  // formats), and spreadsheet cells (real Date objects or Excel serials) into
+  // a UTC-midnight Date. Returns null if unparseable.
+  function parseAnyDate(raw) {
+    if (raw instanceof Date) {
+      if (isNaN(raw.getTime())) return null;
+      return new Date(Date.UTC(raw.getFullYear(), raw.getMonth(), raw.getDate()));
+    }
+    if (typeof raw === "number") {
+      if (raw > 20000 && raw < 90000) { // Excel serial date fallback (days since 1899-12-30)
+        return new Date(Date.UTC(1899, 11, 30) + raw * 86400000);
+      }
+      return null;
+    }
+    if (isBlank(raw)) return null;
+    var s = String(raw).trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  }
+  // Monday of the ISO week containing the given UTC-midnight Date, as YYYY-MM-DD.
+  function isoWeekMondayString(d) {
+    var dow = d.getUTCDay(); // 0=Sun..6=Sat
+    var sinceMonday = (dow + 6) % 7;
+    var monday = new Date(d.getTime() - sinceMonday * 86400000);
+    return monday.getUTCFullYear() + "-" + String(monday.getUTCMonth() + 1).padStart(2, "0") + "-" + String(monday.getUTCDate()).padStart(2, "0");
+  }
+
+  // Maps a raw parsed row (object keyed by source header) to canonical fields
+  // using an alias->field lookup. Numeric fields sum when more than one source
+  // column maps to the same canonical field (e.g. likes+comments+shares -> engagements);
+  // channel/date pass through as the raw string/Date value. Columns with no
+  // alias match (respondent names, emails, free text, etc.) are never copied -
+  // this is what keeps PII out of the tool by construction.
+  function mapRow(raw, aliasToField) {
+    var mapped = {};
+    Object.keys(raw).forEach(function (key) {
+      var field = aliasToField[normalizeHeader(key)];
+      if (!field || isBlank(raw[key])) return;
+      if (field === "channel" || field === "date" || field === "week") {
+        mapped[field] = raw[key];
+      } else {
+        mapped[field] = (mapped[field] || 0) + toNumber(raw[key]);
+      }
+    });
+    return mapped;
+  }
+
+  // Builds one pre-aggregation row (still at whatever grain the source file
+  // was in - daily, per-post, or already-weekly) from a mapped field object.
+  // Shared by the canonical path, every adapter, and the manual-mapping path.
+  function buildPreAggRow(mapped, channel, dateValue) {
+    if (isBlank(channel) || isBlank(dateValue)) return null;
+    var reach = mapped.reach !== undefined ? toNumber(mapped.reach) : toNumber(mapped.impressions);
+    var conversions = mapped.conversions !== undefined
+      ? toNumber(mapped.conversions)
+      : (toNumber(mapped.form_submissions) + toNumber(mapped.new_subscribers));
+    return {
+      rawdate: dateValue,
+      channel: String(channel).trim(),
+      reach: reach,
+      impressions: toNumber(mapped.impressions),
+      engagements: toNumber(mapped.engagements),
+      followers: toNumber(mapped.followers),
+      clicks: toNumber(mapped.clicks),
+      conversions: conversions
+    };
+  }
+
+  function normalizeCanonicalRows(rawRows) {
     var out = [];
     rawRows.forEach(function (raw) {
-      var mapped = {};
-      Object.keys(raw).forEach(function (key) {
-        var field = ALIAS_TO_FIELD[normalizeHeader(key)];
-        if (field && !isBlank(raw[key])) mapped[field] = raw[key];
-      });
-      var week = parseWeekISO(mapped.week);
-      var channel = isBlank(mapped.channel) ? null : String(mapped.channel).trim();
-      if (!week || !channel) return;
+      var mapped = mapRow(raw, CANONICAL_ALIAS_TO_FIELD);
+      var row = buildPreAggRow(mapped, mapped.channel, mapped.week);
+      if (row) out.push(row);
+    });
+    return out;
+  }
 
-      var reach = mapped.reach !== undefined ? toNumber(mapped.reach) : toNumber(mapped.impressions);
-      var conversions = mapped.conversions !== undefined
-        ? toNumber(mapped.conversions)
-        : (toNumber(mapped.form_submissions) + toNumber(mapped.new_subscribers));
+  // Reshapes any-grain pre-aggregation rows into exactly one row per
+  // channel x ISO week: additive metrics sum across the week, followers
+  // (a running total, not a per-day count) takes the latest value seen.
+  function aggregateToWeek(preAggRows) {
+    var groups = {};
+    preAggRows.forEach(function (r) {
+      var d = parseAnyDate(r.rawdate);
+      if (!d) return;
+      var week = isoWeekMondayString(d);
+      var key = r.channel + "|" + week;
+      if (!groups[key]) {
+        groups[key] = { week: week, channel: r.channel, reach: 0, impressions: 0, engagements: 0, followers: 0, clicks: 0, conversions: 0, _followersDate: null };
+      }
+      var g = groups[key];
+      g.reach += r.reach;
+      g.impressions += r.impressions;
+      g.engagements += r.engagements;
+      g.clicks += r.clicks;
+      g.conversions += r.conversions;
+      if (g._followersDate === null || d.getTime() >= g._followersDate) { g.followers = r.followers; g._followersDate = d.getTime(); }
+    });
+    return Object.keys(groups).map(function (k) {
+      var g = groups[k];
+      delete g._followersDate;
+      return g;
+    });
+  }
+  function looksCanonical(normHeaderSet) {
+    var hasWeek = CANONICAL_ALIASES.week.some(function (a) { return normHeaderSet.has(a); });
+    var hasChannel = CANONICAL_ALIASES.channel.some(function (a) { return normHeaderSet.has(a); });
+    return hasWeek && hasChannel;
+  }
 
-      out.push({
-        week: week,
-        channel: channel,
-        reach: reach,
-        impressions: toNumber(mapped.impressions),
-        engagements: toNumber(mapped.engagements),
-        followers: toNumber(mapped.followers),
-        clicks: toNumber(mapped.clicks),
-        conversions: conversions
-      });
+  // ---------- Platform adapters ----------
+  // Each adapter recognizes one platform's raw export (by column signature,
+  // with a filename boost) and maps it to canonical fields for a fixed
+  // channel. Exports are usually daily/per-post; aggregateToWeek() rolls
+  // them up. To fix an adapter after a platform changes its export, edit
+  // its aliasToField / signature here - nothing else in the app needs to
+  // change. If a fix isn't obvious, the manual-mapping fallback (triggered
+  // when no adapter matches) covers the file in the meantime.
+  var ADAPTERS = [
+    {
+      id: "facebook_page_insights",
+      label: "Meta / Facebook Page Insights",
+      channel: "Facebook",
+      filenameHints: [/facebook/i, /\bfb\b/i, /meta.*page/i],
+      signature: ["date", "reach", "page_reach", "impressions", "page_impressions", "reactions_comments_and_shares",
+        "content_interactions", "link_clicks", "page_followers", "page_fans", "page_likes"],
+      aliasToField: buildAliasToField({
+        date: ["date", "day"],
+        reach: ["reach", "post_reach", "page_reach", "total_reach"],
+        impressions: ["impressions", "page_impressions", "total_impressions"],
+        engagements: ["reactions_comments_and_shares", "content_interactions", "engagement", "engagements", "post_engagements", "reactions", "comments", "shares"],
+        followers: ["page_followers", "followers", "page_fans", "page_likes", "total_page_likes", "net_followers"],
+        clicks: ["link_clicks", "post_clicks", "clicks"],
+        conversions: ["conversions"]
+      })
+    },
+    {
+      id: "instagram_insights",
+      label: "Instagram Insights",
+      channel: "Instagram",
+      filenameHints: [/instagram/i, /\big\b/i],
+      signature: ["date", "reach", "accounts_reached", "impressions", "follows", "net_follows", "profile_visits",
+        "likes", "comments", "shares", "saves", "website_taps", "profile_clicks"],
+      aliasToField: buildAliasToField({
+        date: ["date", "day"],
+        reach: ["reach", "accounts_reached"],
+        impressions: ["impressions"],
+        engagements: ["engagement", "engagements", "interactions", "likes", "comments", "shares", "saves"],
+        followers: ["followers", "follows", "net_follows", "total_followers"],
+        clicks: ["website_taps", "external_link_taps", "profile_clicks", "link_clicks"],
+        conversions: ["conversions"]
+      })
+    },
+    {
+      id: "linkedin_page_analytics",
+      label: "LinkedIn Page Analytics",
+      channel: "LinkedIn",
+      filenameHints: [/linkedin/i],
+      signature: ["date", "impressions", "clicks", "reactions", "comments", "reposts", "shares",
+        "engagement_rate", "new_followers", "total_followers"],
+      aliasToField: buildAliasToField({
+        date: ["date", "day"],
+        reach: ["impressions", "unique_impressions"],
+        impressions: ["impressions"],
+        engagements: ["reactions", "comments", "reposts", "shares", "engagements", "engagement"],
+        followers: ["total_followers", "followers"],
+        clicks: ["clicks"],
+        conversions: ["conversions"]
+      })
+    },
+    {
+      id: "linktree",
+      label: "Linktree Analytics",
+      channel: "Linktree",
+      filenameHints: [/linktree/i],
+      signature: ["date", "views", "total_views", "clicks", "total_clicks", "click_through_rate"],
+      aliasToField: buildAliasToField({
+        date: ["date", "day"],
+        reach: ["views", "total_views", "page_views"],
+        impressions: ["views", "total_views"],
+        clicks: ["clicks", "total_clicks", "link_clicks"],
+        conversions: ["conversions"]
+      })
+    },
+    {
+      id: "newsletter_mailchimp",
+      label: "Newsletter (Mailchimp-style export)",
+      channel: "Newsletter",
+      filenameHints: [/mailchimp/i, /newsletter/i, /campaign/i],
+      signature: ["send_date", "send_time", "emails_sent", "recipients", "opens", "unique_opens",
+        "clicks", "unique_clicks", "subscribers", "total_subscribers"],
+      aliasToField: buildAliasToField({
+        date: ["send_date", "send_time", "date"],
+        reach: ["emails_sent", "recipients", "successful_deliveries"],
+        impressions: ["emails_sent", "recipients"],
+        engagements: ["unique_opens", "opens"],
+        followers: ["total_subscribers", "subscribers", "list_size", "audience_total"],
+        clicks: ["unique_clicks", "clicks"],
+        conversions: ["conversions"],
+        new_subscribers: ["new_subscribers", "subscribed", "signups"]
+      })
+    }
+  ];
+  var ADAPTER_MATCH_THRESHOLD = 0.4;
+
+  function detectAdapter(headers, filename) {
+    var normSet = new Set(headers.map(normalizeHeader));
+    var best = null, bestScore = 0;
+    ADAPTERS.forEach(function (a) {
+      var matched = a.signature.filter(function (s) { return normSet.has(s); }).length;
+      var score = matched / a.signature.length;
+      if (a.filenameHints.some(function (re) { return re.test(filename); })) score += 0.15;
+      if (score > bestScore) { bestScore = score; best = a; }
+    });
+    return bestScore >= ADAPTER_MATCH_THRESHOLD ? best : null;
+  }
+
+  function runAdapter(adapter, rawRows) {
+    var out = [];
+    rawRows.forEach(function (raw) {
+      var mapped = mapRow(raw, adapter.aliasToField);
+      var row = buildPreAggRow(mapped, adapter.channel, mapped.date);
+      if (row) out.push(row);
     });
     return out;
   }
@@ -736,33 +954,221 @@
   }
 
   // ---------- Ingest ----------
-  function parseFiles(fileList) {
-    var files = Array.prototype.filter.call(fileList, function (f) { return /\.csv$/i.test(f.name); });
-    if (!files.length) return;
-    if (typeof Papa === "undefined") {
-      alert("CSV parser failed to load (offline / CDN blocked). Try the offline build (index.offline.html).");
-      return;
+  // Accepts CSV, TSV (via PapaParse, which auto-detects the delimiter) and
+  // Excel .xlsx/.xls (via SheetJS, first sheet) - returns an array of raw
+  // row objects keyed by source header, matching PapaParse's header:true shape.
+  function parseFileToRawRows(file) {
+    if (/\.(xlsx|xls)$/i.test(file.name)) {
+      if (typeof XLSX === "undefined") return Promise.reject(new Error("Spreadsheet library unavailable"));
+      return file.arrayBuffer().then(function (buf) {
+        var wb = XLSX.read(buf, { type: "array", cellDates: true });
+        var sheet = wb.Sheets[wb.SheetNames[0]];
+        return XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      });
     }
-    var pending = files.length;
-    var allRows = [];
-    files.forEach(function (file) {
+    if (typeof Papa === "undefined") return Promise.reject(new Error("CSV/TSV parser unavailable"));
+    return new Promise(function (resolve, reject) {
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        complete: function (results) {
-          allRows = allRows.concat(results.data || []);
-          pending--;
-          if (pending === 0) {
-            var normalized = normalizeRows(allRows);
-            loadRows(normalized, false);
-          }
-        },
-        error: function () {
-          pending--;
-          if (pending === 0) loadRows(normalizeRows(allRows), false);
-        }
+        complete: function (results) { resolve(results.data || []); },
+        error: function (err) { reject(err); }
       });
     });
+  }
+
+  // Manual-mapping fallback: shown when a file matches neither the canonical
+  // schema nor any platform adapter. Session-only - nothing here is stored.
+  // Resolves to an array of pre-aggregation rows, or null if the user skips.
+  function openMappingModal(item) {
+    return new Promise(function (resolve) {
+      var headers = item.headers;
+
+      function guessColumn(aliasList) {
+        return headers.find(function (h) { return aliasList.indexOf(normalizeHeader(h)) !== -1; }) || "";
+      }
+      function makeSelect(id, noneLabel, selectedGuess) {
+        var select = document.createElement("select");
+        select.id = id;
+        var noneOpt = document.createElement("option");
+        noneOpt.value = "";
+        noneOpt.textContent = noneLabel;
+        select.appendChild(noneOpt);
+        headers.forEach(function (h) {
+          var opt = document.createElement("option");
+          opt.value = h;
+          opt.textContent = h;
+          if (h === selectedGuess) opt.selected = true;
+          select.appendChild(opt);
+        });
+        return select;
+      }
+
+      var overlay = document.createElement("div");
+      overlay.className = "mapping-overlay";
+      overlay.setAttribute("role", "dialog");
+      overlay.setAttribute("aria-modal", "true");
+      overlay.setAttribute("aria-label", "Map columns for " + item.file.name);
+
+      var panel = document.createElement("div");
+      panel.className = "mapping-panel";
+      overlay.appendChild(panel);
+
+      var h3 = document.createElement("h3");
+      h3.textContent = "Unrecognized format: " + item.file.name;
+      panel.appendChild(h3);
+
+      var help = document.createElement("p");
+      help.className = "mapping-help";
+      help.textContent = "This file didn't match the canonical schema or a known platform export. Match its columns to the fields below, or skip it - nothing here is saved.";
+      panel.appendChild(help);
+
+      var grid = document.createElement("div");
+      grid.className = "mapping-grid";
+      panel.appendChild(grid);
+
+      function addRow(labelText, selectEl, fixedInputEl) {
+        var row = document.createElement("div");
+        row.className = "mapping-row";
+        var label = document.createElement("label");
+        label.textContent = labelText;
+        label.htmlFor = selectEl.id;
+        row.appendChild(label);
+        row.appendChild(selectEl);
+        if (fixedInputEl) row.appendChild(fixedInputEl);
+        grid.appendChild(row);
+        return row;
+      }
+
+      var weekSelect = makeSelect("map_week_col", "— none (enter one date for the whole file) —", guessColumn(CANONICAL_ALIASES.week));
+      var weekFixed = document.createElement("input");
+      weekFixed.type = "date";
+      weekFixed.id = "map_week_fixed";
+      weekFixed.hidden = !!weekSelect.value;
+      addRow("Week / date column", weekSelect, weekFixed);
+      weekSelect.addEventListener("change", function () { weekFixed.hidden = !!weekSelect.value; });
+
+      var chSelect = makeSelect("map_channel_col", "— none (type one channel for the whole file) —", guessColumn(CANONICAL_ALIASES.channel));
+      var chFixed = document.createElement("input");
+      chFixed.type = "text";
+      chFixed.id = "map_channel_fixed";
+      chFixed.placeholder = "e.g. Instagram";
+      chFixed.hidden = !!chSelect.value;
+      addRow("Channel column", chSelect, chFixed);
+      chSelect.addEventListener("change", function () { chFixed.hidden = !!chSelect.value; });
+
+      var metricFieldDefs = [
+        { key: "reach", label: "Reach", aliases: CANONICAL_ALIASES.reach },
+        { key: "impressions", label: "Impressions", aliases: CANONICAL_ALIASES.impressions },
+        { key: "engagements", label: "Engagement", aliases: CANONICAL_ALIASES.engagements },
+        { key: "followers", label: "Followers", aliases: CANONICAL_ALIASES.followers },
+        { key: "clicks", label: "Clicks", aliases: CANONICAL_ALIASES.clicks },
+        { key: "conversions", label: "Sign-ups / conversions", aliases: CANONICAL_ALIASES.conversions }
+      ];
+      var metricSelects = {};
+      metricFieldDefs.forEach(function (f) {
+        var select = makeSelect("map_" + f.key, "— not in this file —", guessColumn(f.aliases));
+        addRow(f.label, select);
+        metricSelects[f.key] = select;
+      });
+
+      var btnRow = document.createElement("div");
+      btnRow.className = "btn-row";
+      btnRow.style.marginTop = "14px";
+      var applyBtn = document.createElement("button");
+      applyBtn.type = "button"; applyBtn.className = "btn-primary"; applyBtn.textContent = "Use this mapping";
+      var skipBtn = document.createElement("button");
+      skipBtn.type = "button"; skipBtn.textContent = "Skip this file";
+      btnRow.appendChild(applyBtn);
+      btnRow.appendChild(skipBtn);
+      panel.appendChild(btnRow);
+
+      document.body.appendChild(overlay);
+      applyBtn.focus();
+
+      function cleanup() { document.body.removeChild(overlay); document.removeEventListener("keydown", onKeydown); }
+      function onKeydown(e) { if (e.key === "Escape") { cleanup(); resolve(null); } }
+      document.addEventListener("keydown", onKeydown);
+
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) { cleanup(); resolve(null); } });
+      skipBtn.addEventListener("click", function () { cleanup(); resolve(null); });
+
+      applyBtn.addEventListener("click", function () {
+        var weekCol = weekSelect.value, fixedWeek = weekFixed.value;
+        if (!weekCol && !fixedWeek) { weekFixed.hidden = false; weekFixed.focus(); return; }
+        var chCol = chSelect.value, fixedChannel = chFixed.value.trim();
+        if (!chCol && !fixedChannel) { chFixed.hidden = false; chFixed.focus(); return; }
+
+        var aliasToField = {};
+        if (weekCol) aliasToField[normalizeHeader(weekCol)] = "date";
+        if (chCol) aliasToField[normalizeHeader(chCol)] = "channel";
+        metricFieldDefs.forEach(function (f) {
+          var col = metricSelects[f.key].value;
+          if (col) aliasToField[normalizeHeader(col)] = f.key;
+        });
+
+        var rows = item.rawRows.map(function (raw) {
+          var mapped = mapRow(raw, aliasToField);
+          var dateValue = weekCol ? mapped.date : fixedWeek;
+          var channelValue = chCol ? mapped.channel : fixedChannel;
+          return buildPreAggRow(mapped, channelValue, dateValue);
+        }).filter(Boolean);
+
+        cleanup();
+        resolve(rows);
+      });
+    });
+  }
+
+  // Orchestrates a drop/selection of one or more files: canonical schema and
+  // known platform exports are handled automatically; anything unrecognized
+  // falls to the manual-mapping modal (one at a time) rather than failing the
+  // batch. Everything is combined and reshaped to weekly in one final pass.
+  async function handleFiles(fileList) {
+    var files = Array.prototype.filter.call(fileList, function (f) { return /\.(csv|tsv|xlsx|xls)$/i.test(f.name); });
+    if (!files.length) return;
+
+    var needsPapa = files.some(function (f) { return /\.(csv|tsv)$/i.test(f.name); }) && typeof Papa === "undefined";
+    var needsXlsx = files.some(function (f) { return /\.(xlsx|xls)$/i.test(f.name); }) && typeof XLSX === "undefined";
+    if (needsPapa || needsXlsx) {
+      alert("A required file parser failed to load (offline / CDN blocked). Try the offline build (index.offline.html).");
+      return;
+    }
+
+    var preAggRows = [];
+    var failures = [];
+
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      var rawRows;
+      try {
+        rawRows = await parseFileToRawRows(file);
+      } catch (e) {
+        console.error(e);
+        failures.push(file.name);
+        continue;
+      }
+      if (!rawRows || !rawRows.length) continue;
+
+      var headers = Object.keys(rawRows[0]);
+      var normSet = new Set(headers.map(normalizeHeader));
+
+      if (looksCanonical(normSet)) {
+        preAggRows = preAggRows.concat(normalizeCanonicalRows(rawRows));
+        continue;
+      }
+      var adapter = detectAdapter(headers, file.name);
+      if (adapter) {
+        preAggRows = preAggRows.concat(runAdapter(adapter, rawRows));
+        continue;
+      }
+      var mappedRows = await openMappingModal({ file: file, rawRows: rawRows, headers: headers });
+      if (mappedRows) preAggRows = preAggRows.concat(mappedRows);
+    }
+
+    if (failures.length) alert("Could not read: " + failures.join(", ") + ". Other files were still processed.");
+    if (!preAggRows.length) return;
+    loadRows(aggregateToWeek(preAggRows), false);
   }
 
   function downloadTemplate() {
@@ -794,7 +1200,7 @@
   // ---------- Wire up ----------
   var dropzone = document.getElementById("dropzone");
   var fileInput = document.getElementById("fileInput");
-  fileInput.addEventListener("change", function () { parseFiles(fileInput.files); fileInput.value = ""; });
+  fileInput.addEventListener("change", function () { handleFiles(fileInput.files); fileInput.value = ""; });
   ["dragenter", "dragover"].forEach(function (evt) {
     dropzone.addEventListener(evt, function (e) { e.preventDefault(); dropzone.classList.add("drag-over"); });
   });
@@ -802,7 +1208,7 @@
     dropzone.addEventListener(evt, function (e) { e.preventDefault(); dropzone.classList.remove("drag-over"); });
   });
   dropzone.addEventListener("drop", function (e) {
-    if (e.dataTransfer && e.dataTransfer.files) parseFiles(e.dataTransfer.files);
+    if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
   });
 
   document.getElementById("templateBtn").addEventListener("click", downloadTemplate);

@@ -17,6 +17,7 @@ var cp = require("child_process");
 var ROOT = path.join(__dirname, "..");
 var PAPAPARSE_VERSION = "5.4.1";
 var CHARTJS_VERSION = "4.4.4";
+var XLSX_VERSION = "0.18.5";
 
 function run(cmd, args, cwd) {
   var res = cp.spawnSync(cmd, args, { cwd: cwd, stdio: "inherit" });
@@ -26,17 +27,21 @@ function run(cmd, args, cwd) {
 function main() {
   var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cdls-offline-"));
 
-  run("npm", ["pack", "papaparse@" + PAPAPARSE_VERSION, "chart.js@" + CHARTJS_VERSION], tmp);
+  run("npm", ["pack", "papaparse@" + PAPAPARSE_VERSION, "chart.js@" + CHARTJS_VERSION, "xlsx@" + XLSX_VERSION], tmp);
 
   var papaDir = path.join(tmp, "papaparse-pkg");
   var chartDir = path.join(tmp, "chartjs-pkg");
+  var xlsxDir = path.join(tmp, "xlsx-pkg");
   fs.mkdirSync(papaDir);
   fs.mkdirSync(chartDir);
+  fs.mkdirSync(xlsxDir);
   run("tar", ["xzf", path.join(tmp, "papaparse-" + PAPAPARSE_VERSION + ".tgz"), "-C", papaDir, "--strip-components=1"]);
   run("tar", ["xzf", path.join(tmp, "chart.js-" + CHARTJS_VERSION + ".tgz"), "-C", chartDir, "--strip-components=1"]);
+  run("tar", ["xzf", path.join(tmp, "xlsx-" + XLSX_VERSION + ".tgz"), "-C", xlsxDir, "--strip-components=1"]);
 
   var papaparseSrc = fs.readFileSync(path.join(papaDir, "papaparse.min.js"), "utf8");
   var chartjsSrc = fs.readFileSync(path.join(chartDir, "dist", "chart.umd.js"), "utf8");
+  var xlsxSrc = fs.readFileSync(path.join(xlsxDir, "dist", "xlsx.full.min.js"), "utf8");
 
   var html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   var startMarker = "<!-- CDLS-BUILD:LIBS-START -->";
@@ -48,7 +53,8 @@ function main() {
   var inlined =
     startMarker + "\n" +
     "<script>\n/* PapaParse " + PAPAPARSE_VERSION + " (MIT) - inlined for offline use */\n" + papaparseSrc + "\n</script>\n" +
-    "<script>\n/* Chart.js " + CHARTJS_VERSION + " (MIT) - inlined for offline use */\n" + chartjsSrc + "\n</script>\n";
+    "<script>\n/* Chart.js " + CHARTJS_VERSION + " (MIT) - inlined for offline use */\n" + chartjsSrc + "\n</script>\n" +
+    "<script>\n/* SheetJS xlsx " + XLSX_VERSION + " (Apache-2.0) - inlined for offline use */\n" + xlsxSrc + "\n</script>\n";
 
   var out = html.slice(0, startIdx) + inlined + html.slice(endIdx + endMarker.length);
   fs.writeFileSync(path.join(ROOT, "index.offline.html"), out);

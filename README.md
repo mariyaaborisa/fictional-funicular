@@ -1,9 +1,9 @@
 # Pulser
 
-A freestanding, client-side weekly communications dashboard. Drop in CSV exports
-from each channel and immediately see growth trends and a click→sign-up funnel
-across every channel — reach, engagement, followers, clicks, and sign-ups, week
-over week.
+A freestanding, client-side weekly communications dashboard. Drop in raw
+exports from each channel — CSV, TSV, or Excel — and immediately see growth
+trends and a click→sign-up funnel across every channel — reach, engagement,
+followers, clicks, and sign-ups, week over week.
 
 **No accounts. No backend. No data leaves your browser.**
 
@@ -21,7 +21,8 @@ a link to a static file.
 - Opens directly from disk (`file://`) or from any static host.
 - Renders a fully populated dashboard with **sample data** the first time you
   open it, so there's always something to look at.
-- Drag in your own CSV(s) and the sample data is replaced immediately.
+- Drag in your own files (CSV, TSV, or Excel) and the sample data is
+  replaced immediately.
 - Nothing you upload is ever saved, sent anywhere, or written to browser
   storage. Refresh the page and you're back to a clean slate.
 
@@ -57,19 +58,43 @@ This pulls the pinned library versions from the npm registry at build time
 only, inlines them, and writes `index.offline.html`. The generated file
 itself makes no external requests — verify in your browser's Network tab.
 
-Pinned dependencies (both MIT licensed):
-- [PapaParse](https://www.papaparse.com/) 5.4.1 — CSV parsing
-- [Chart.js](https://www.chartjs.org/) 4.4.4 — the growth line chart
+Pinned dependencies:
+- [PapaParse](https://www.papaparse.com/) 5.4.1 (MIT) — CSV/TSV parsing, with automatic delimiter detection
+- [Chart.js](https://www.chartjs.org/) 4.4.4 (MIT) — the growth line chart
+- [SheetJS `xlsx`](https://sheetjs.com/) 0.18.5 (Apache-2.0) — Excel `.xlsx`/`.xls` parsing
 
 If Chart.js fails to load (blocked network, offline without the offline
 build), the growth chart shows a text fallback — the KPI tiles, funnel, and
-detail table are plain HTML/CSS and keep working regardless.
+detail table are plain HTML/CSS and keep working regardless. If PapaParse or
+SheetJS fail to load, uploading that file type is disabled with a clear
+message (the app itself, and any already-loaded data, still works).
 
-## The CSV schema
+## Ingesting data
 
-One row per **channel × ISO week** (week start = Monday). Upload one or more
-files at once — they're concatenated. A row missing `week` or `channel` is
-skipped silently rather than failing the whole batch.
+Drop in **CSV, TSV, or Excel (`.xlsx`/`.xls`)** files — one or more at once,
+mixed types and mixed platforms in the same drop are fine. Each file is
+routed through one of three paths, tried in order, and everything from the
+whole batch is merged into one dataset:
+
+1. **Canonical schema** — the file already has `week` and `channel` columns
+   (see below). Used as-is.
+2. **A platform adapter** — the file's columns match a known raw export
+   (see "Platform adapters" below). Detected automatically by column
+   signature (with a filename hint as a tiebreaker) and reshaped to weekly.
+3. **Manual mapping** — neither of the above matched. Instead of failing,
+   the app shows a one-time mapping step: it lists the file's columns and
+   lets you assign each to a canonical field (and type in a fixed
+   channel/week if the file doesn't have those as columns). This is
+   **session-only** — nothing about the mapping is saved — and it's the
+   resilience valve for a platform quietly changing its export format: a
+   broken adapter degrades to "map it yourself," never a broken tool.
+
+A row missing both a resolvable date and a channel is skipped silently
+rather than failing the whole batch.
+
+### The canonical schema
+
+One row per **channel × ISO week** (week start = Monday).
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -97,6 +122,33 @@ are read as `0`/blank rather than erroring. Recognized aliases per column:
 Download a starter file from the app ("Download template CSV") or use
 [`sample/comms_template.csv`](sample/comms_template.csv).
 
+### Platform adapters
+
+Ship for: **Meta/Facebook Page Insights, Instagram Insights, LinkedIn Page
+Analytics, Linktree Analytics, and Mailchimp-style newsletter campaign
+exports.** These raw exports are usually daily or per-post — the matching
+adapter reshapes them to one row per channel per ISO week automatically:
+additive metrics (reach, impressions, engagements, clicks, conversions) sum
+across the week; `followers` (a running total, not a daily count) takes the
+**latest** value seen that week.
+
+**Known limitation:** some platforms only export follower *deltas*
+("new followers today") rather than a running total. Where that's the only
+column available, an adapter's `followers` output will read as that day's
+delta, not your actual audience size — there's no way to reconstruct a
+cumulative total from deltas alone without a starting baseline. If you hit
+this, either ignore the Followers column for that channel or track it
+separately until the export includes a snapshot total.
+
+Adapters are intentionally the most likely thing to break — a platform can
+change its export columns at any time. Each one is a small, self-contained
+block (detector + column map) inside `index.html`, marked
+`// ---------- Platform adapters ----------`. **To fix an adapter, edit its
+`aliasToField` (and `signature`, if the platform renamed a column you rely
+on for detection) in that one block — nothing else in the app needs to
+change.** Until it's fixed, files from that platform still work; they just
+fall to the manual-mapping step.
+
 ### Funnel
 
 `Reach → Engagement → Clicks → Sign-ups`, summed across the selected channels
@@ -109,11 +161,22 @@ for the selected week.
 
 **Only upload aggregate numbers.** This tool is built to handle "47 form
 submissions," never the 47 people who submitted them. Do not put
-respondent-level data — names, emails, free-text answers — into the CSV. If
+respondent-level data — names, emails, free-text answers — into the file. If
 your source system (e.g. Google Forms) exports individual responses,
 aggregate them into a count before they ever reach this tool. The Google
 Sheet or intake form you already use remains the record of truth; this
 dashboard is a disposable, stateless read-out of it.
+
+This holds on every ingestion path, not just the canonical schema.
+Adapters and the manual-mapping step only ever *copy* the specific columns
+mapped to a canonical field (reach, clicks, followers, etc.) into the
+dataset — a name or email column left unmapped is simply never read past
+detection; it's discarded with the rest of the file the moment parsing
+finishes. If a raw export is respondent-level (a Google Forms/Typeform
+response dump, say), map only the date/channel and leave every PII column
+unmapped — you'll end up with a per-week row count, not a name list. If the
+file has no natural count at all, aggregate it to counts in the source
+system first.
 
 ## Security & privacy model
 
@@ -170,5 +233,7 @@ source of record; this tool is a stateless read-out of it.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Fork it, host it yourself, hand it to the next
-cohort.
+This project is MIT — see [LICENSE](LICENSE). Fork it, host it yourself,
+hand it to the next cohort. Bundled third-party libraries keep their own
+licenses (PapaParse and Chart.js are MIT; SheetJS `xlsx` is Apache-2.0),
+noted above where each is pinned.
