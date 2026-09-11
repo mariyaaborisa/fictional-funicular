@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CDLS Comms Pulse</title>
+<meta name="description" content="Stateless, client-side weekly communications dashboard. No accounts, no backend, no data leaves the browser.">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --good: #0ca30c;
+    --good-text: #006300;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --series-6: #008300;
+    --series-7: #4a3aa7;
+    --series-8: #e34948;
+    --seq-300: #6da7ec;
+    --seq-400: #3987e5;
+    --seq-500: #256abf;
+    --seq-600: #184f95;
+    --focus-ring: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --good-text: #0ca30c;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #c98500;
+      --series-5: #d55181;
+      --series-6: #008300;
+      --series-7: #9085e9;
+      --series-8: #e66767;
+      --focus-ring: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --good-text: #0ca30c;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --focus-ring: #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body { padding: 16px; padding-bottom: 48px; }
+  a { color: var(--series-1); }
+  h1, h2, h3 { margin: 0 0 4px; }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+
+  header.app-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+  }
+  header.app-header p { margin: 4px 0 0; color: var(--text-secondary); font-size: 14px; max-width: 60ch; }
+
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+    padding: 8px 12px;
+  }
+  button:hover { border-color: var(--text-muted); }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--focus-ring); outline-offset: 2px;
+  }
+  .btn-primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  section.card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
+
+  #dropzone {
+    border: 2px dashed var(--baseline); border-radius: 10px; padding: 20px;
+    text-align: center; color: var(--text-secondary); font-size: 14px;
+    transition: border-color .15s, background .15s;
+  }
+  #dropzone.drag-over { border-color: var(--series-1); background: color-mix(in srgb, var(--series-1) 8%, transparent); }
+  #dropzone label { color: var(--series-1); cursor: pointer; text-decoration: underline; }
+  #fileInput { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  #sampleBanner {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    background: color-mix(in srgb, var(--series-4) 16%, var(--surface-1));
+    border: 1px solid var(--series-4); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px;
+  }
+  #sampleBanner strong { color: var(--text-primary); }
+
+  .filters-row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .filter-group { display: flex; flex-direction: column; gap: 8px; }
+  .filter-group label.group-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+  .chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-1); padding: 6px 12px; font-size: 13px;
+  }
+  .chip[aria-pressed="false"] { opacity: 0.5; }
+  .chip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  select#weekSelect { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); font: inherit; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .kpi-tile { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .kpi-tile .kpi-label { font-size: 13px; color: var(--text-secondary); }
+  .kpi-tile .kpi-value { font-size: 26px; font-weight: 700; margin: 4px 0; font-variant-numeric: proportional-nums; }
+  .kpi-delta { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+  .kpi-delta.good { color: var(--good-text); }
+  .kpi-delta.critical { color: var(--critical); }
+  .kpi-delta.muted { color: var(--text-muted); }
+
+  .tablist { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tablist button { padding: 6px 12px; font-size: 13px; border-radius: 999px; }
+  .tablist button[aria-selected="true"] { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+
+  .chart-shell { position: relative; height: 280px; }
+  .chart-fallback { color: var(--text-muted); font-size: 14px; padding: 40px 0; text-align: center; }
+  .legend-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
+  .legend-row .item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-row .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+  .funnel-stage { margin-bottom: 10px; }
+  .funnel-stage .stage-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .funnel-stage .stage-head .name { color: var(--text-secondary); }
+  .funnel-stage .stage-head .value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .funnel-track { background: var(--gridline); border-radius: 6px; height: 18px; overflow: hidden; }
+  .funnel-fill { height: 100%; border-radius: 6px; min-width: 2px; }
+  .rate-row { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--gridline); }
+  .rate-item .rate-label { font-size: 13px; color: var(--text-secondary); }
+  .rate-item .rate-value { font-size: 20px; font-weight: 700; }
+
+  .table-scroll { overflow-x: auto; }
+  table.detail { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 14px; }
+  table.detail th, table.detail td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  table.detail th:first-child, table.detail td:first-child { text-align: left; font-variant-numeric: normal; }
+  table.detail thead th { color: var(--text-secondary); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  table.detail tfoot td { font-weight: 700; border-top: 2px solid var(--baseline); border-bottom: none; }
+  table.detail .ch-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+
+  .empty-state { text-align: center; padding: 32px 16px; color: var(--text-secondary); }
+
+  footer.app-footer {
+    margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--gridline);
+    font-size: 13px; color: var(--text-muted); max-width: 76ch;
+  }
+  footer.app-footer strong { color: var(--text-secondary); }
+
+  .theme-toggle { font-size: 13px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+  @media (max-width: 480px) {
+    .kpi-tile .kpi-value { font-size: 22px; }
+    section.card { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="app-header">
+    <div>
+      <h1>CDLS Comms Pulse</h1>
+      <p>Drop in weekly CSV exports to see growth trends and the click→sign-up funnel across every channel. Everything runs in this browser tab; nothing is uploaded anywhere.</p>
+    </div>
+    <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle color theme">🌓 Theme: <span id="themeLabel">System</span></button>
+  </header>
+
+  <div id="sampleBanner" hidden>
+    <span>📊 <strong>Showing sample data.</strong> Upload your own CSVs to replace it.</span>
+    <div class="btn-row">
+      <button type="button" id="reloadSampleBtn">Reload sample</button>
+      <button type="button" id="clearBtn">Clear</button>
+    </div>
+  </div>
+
+  <section class="card" id="ingest">
+    <h2>Import data</h2>
+    <div id="dropzone">
+      Drag and drop CSV file(s) here, or
+      <label for="fileInput">choose files</label>
+      <input type="file" id="fileInput" accept=".csv" multiple>
+      <div style="margin-top:10px; font-size:13px;">One row per channel × week. Missing columns read as 0/blank — see the schema in the README.</div>
+    </div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button type="button" id="templateBtn">Download template CSV</button>
+      <button type="button" id="reloadSampleBtn2">Reload sample data</button>
+      <button type="button" id="clearBtn2">Clear data</button>
+    </div>
+  </section>
+
+  <section class="card" id="filters">
+    <h2>Filters</h2>
+    <div class="filters-row">
+      <div class="filter-group">
+        <label class="group-label" id="weekSelectLabel" for="weekSelect">Reporting week</label>
+        <select id="weekSelect" aria-labelledby="weekSelectLabel"></select>
+      </div>
+      <div class="filter-group" style="flex:1; min-width:200px;">
+        <span class="group-label" id="channelChipsLabel">Channels</span>
+        <div class="chip-row" id="channelChips" role="group" aria-labelledby="channelChipsLabel"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="kpis">
+    <h2>Weekly KPIs</h2>
+    <div class="kpi-grid" id="kpiGrid"></div>
+  </section>
+
+  <section class="card" id="growth">
+    <h2>Growth</h2>
+    <div class="tablist" id="metricTabs" role="tablist" aria-label="Growth chart metric"></div>
+    <div class="chart-shell">
+      <canvas id="growthCanvas" role="img" aria-label="Line chart of the selected metric by channel over time"></canvas>
+      <div class="chart-fallback" id="chartFallback" hidden>Chart library unavailable — see the detail table below for the same numbers.</div>
+    </div>
+    <div class="legend-row" id="growthLegend"></div>
+  </section>
+
+  <section class="card" id="funnel">
+    <h2>Funnel — selected week</h2>
+    <div id="funnelStages"></div>
+    <div class="rate-row">
+      <div class="rate-item">
+        <div class="rate-label">Click-through rate (clicks ÷ reach)</div>
+        <div class="rate-value" id="ctrValue">—</div>
+      </div>
+      <div class="rate-item">
+        <div class="rate-label">Conversion rate (sign-ups ÷ clicks)</div>
+        <div class="rate-value" id="convValue">—</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="table">
+    <h2>Detail — selected week</h2>
+    <div class="table-scroll">
+      <table class="detail" id="detailTable">
+        <thead>
+          <tr>
+            <th>Channel</th><th>Reach</th><th>Engagement</th><th>Followers</th><th>Clicks</th><th>Sign-ups</th>
+          </tr>
+        </thead>
+        <tbody id="detailBody"></tbody>
+        <tfoot id="detailFoot"></tfoot>
+      </table>
+    </div>
+  </section>
+
+  <footer class="app-footer">
+    <p><strong>Privacy by design:</strong> this tool runs entirely in your browser. Nothing you upload is saved, sent to a server, or written to browser storage — refreshing the page clears everything.</p>
+    <p><strong>Counts only, never PII:</strong> only upload aggregate numbers (reach, clicks, sign-up counts). Never include respondent-level data — names, emails, or free-text form answers. "47 submissions," never the 47 people.</p>
+    <p>Open source, MIT licensed. See the README for the data schema and full privacy notes.</p>
+  </footer>
+
+</div>
+
+<!-- CDLS-BUILD:LIBS-START -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<!-- CDLS-BUILD:LIBS-END -->
+<script>
+(function () {
+  "use strict";
+
+  // ---------- Data contract: header aliases ----------
+  var ALIASES = {
+    week: ["week", "week_start", "date", "reporting_week", "week_of", "weekof"],
+    channel: ["channel", "platform", "source", "network"],
+    reach: ["reach"],
+    impressions: ["impressions", "impression", "views", "view"],
+    engagements: ["engagements", "engagement", "total_engagements"],
+    followers: ["followers", "followers_total", "subscribers_total", "audience", "subscribers"],
+    clicks: ["clicks", "link_clicks", "linktree_clicks", "total_clicks", "taps"],
+    conversions: ["conversions", "conversion"],
+    form_submissions: ["form_submissions", "submissions", "responses", "response"],
+    new_subscribers: ["new_subscribers", "new_subscriber", "signups", "sign_ups", "new_signups"]
+  };
+  var ALIAS_TO_FIELD = {};
+  Object.keys(ALIASES).forEach(function (field) {
+    ALIASES[field].forEach(function (alias) { ALIAS_TO_FIELD[alias] = field; });
+  });
+
+  var METRICS = [
+    { key: "reach", label: "Reach" },
+    { key: "engagements", label: "Engagement" },
+    { key: "followers", label: "Followers" },
+    { key: "clicks", label: "Clicks" },
+    { key: "conversions", label: "Sign-ups" }
+  ];
+
+  var TEMPLATE_CSV = "week,channel,reach,impressions,engagements,followers,clicks,conversions\n" +
+    "2026-08-04,Instagram,5200,6100,410,3100,180,12\n" +
+    "2026-08-04,Facebook,3100,3600,150,2400,90,4\n" +
+    "2026-08-04,LinkedIn,1800,2000,95,950,60,3\n" +
+    "2026-08-04,Linktree,0,0,0,0,540,28\n" +
+    "2026-08-04,Forms,0,0,0,0,0,15\n" +
+    "2026-08-04,Newsletter,0,0,0,4200,210,9\n";
+
+  // ---------- Normalization helpers ----------
+  function normalizeHeader(h) {
+    return String(h == null ? "" : h).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  }
+  function toNumber(v) {
+    if (v === undefined || v === null || v === "") return 0;
+    var n = parseFloat(String(v).replace(/[,$%\s]/g, ""));
+    return isNaN(n) ? 0 : n;
+  }
+  function isBlank(v) { return v === undefined || v === null || String(v).trim() === ""; }
+  function parseWeekISO(raw) {
+    if (isBlank(raw)) return null;
+    var s = String(raw).trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + "-" + m[2] + "-" + m[3];
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+  }
+  function formatWeekLabel(iso) {
+    var d = new Date(iso + "T00:00:00Z");
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  }
+  function fmt(n) { return Math.round(n).toLocaleString("en-US"); }
+
+  function normalizeRows(rawRows) {
+    var out = [];
+    rawRows.forEach(function (raw) {
+      var mapped = {};
+      Object.keys(raw).forEach(function (key) {
+        var field = ALIAS_TO_FIELD[normalizeHeader(key)];
+        if (field && !isBlank(raw[key])) mapped[field] = raw[key];
+      });
+      var week = parseWeekISO(mapped.week);
+      var channel = isBlank(mapped.channel) ? null : String(mapped.channel).trim();
+      if (!week || !channel) return;
+
+      var reach = mapped.reach !== undefined ? toNumber(mapped.reach) : toNumber(mapped.impressions);
+      var conversions = mapped.conversions !== undefined
+        ? toNumber(mapped.conversions)
+        : (toNumber(mapped.form_submissions) + toNumber(mapped.new_subscribers));
+
+      out.push({
+        week: week,
+        channel: channel,
+        reach: reach,
+        impressions: toNumber(mapped.impressions),
+        engagements: toNumber(mapped.engagements),
+        followers: toNumber(mapped.followers),
+        clicks: toNumber(mapped.clicks),
+        conversions: conversions
+      });
+    });
+    return out;
+  }
+
+  // ---------- Sample data ----------
+  function generateSampleData() {
+    var channels = ["Instagram", "Facebook", "LinkedIn", "Linktree", "Forms", "Newsletter"];
+    var base = {
+      Instagram: { reach: 4800, engagements: 380, followers: 2900, clicks: 150, conversions: 9, growth: 1.03 },
+      Facebook: { reach: 2900, engagements: 140, followers: 2200, clicks: 80, conversions: 4, growth: 1.01 },
+      LinkedIn: { reach: 1500, engagements: 80, followers: 800, clicks: 50, conversions: 3, growth: 1.05 },
+      Linktree: { reach: 0, engagements: 0, followers: 0, clicks: 480, conversions: 24, growth: 1.02 },
+      Forms: { reach: 0, engagements: 0, followers: 0, clicks: 0, conversions: 12, growth: 1.02 },
+      Newsletter: { reach: 0, engagements: 0, followers: 3900, clicks: 190, conversions: 7, growth: 1.015 }
+    };
+    var seed = 42;
+    function rand() { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }
+    var weeks = [];
+    var start = new Date("2026-06-29T00:00:00Z");
+    for (var w = 0; w < 10; w++) {
+      var d = new Date(start.getTime() + w * 7 * 86400000);
+      weeks.push(d.toISOString().slice(0, 10));
+    }
+    var rows = [];
+    channels.forEach(function (ch) {
+      var b = base[ch];
+      var reach = b.reach, engagements = b.engagements, followers = b.followers, clicks = b.clicks, conversions = b.conversions;
+      weeks.forEach(function (week) {
+        var jitter = 0.9 + rand() * 0.2;
+        rows.push({
+          week: week,
+          channel: ch,
+          reach: Math.round(reach * jitter),
+          impressions: Math.round(reach * jitter * 1.2),
+          engagements: Math.round(engagements * jitter),
+          followers: Math.round(followers),
+          clicks: Math.round(clicks * jitter),
+          conversions: Math.max(0, Math.round(conversions * jitter))
+        });
+        reach *= b.growth; engagements *= b.growth; followers *= 1.01; clicks *= b.growth; conversions *= b.growth;
+      });
+    });
+    return rows;
+  }
+
+  // ---------- Palette ----------
+  var SERIES_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  // ---------- State ----------
+  var state = {
+    rows: [],
+    isSample: true,
+    channels: [],
+    channelColor: {},
+    weeks: [],
+    selectedWeek: null,
+    selectedChannels: new Set(),
+    metric: "reach"
+  };
+  var chartInstance = null;
+
+  function loadRows(rows, isSample) {
+    state.rows = rows;
+    state.isSample = isSample;
+    var channelSet = {};
+    rows.forEach(function (r) { channelSet[r.channel] = true; });
+    state.channels = Object.keys(channelSet).sort(function (a, b) { return a.localeCompare(b); });
+    state.channelColor = {};
+    state.channels.forEach(function (ch, i) {
+      state.channelColor[ch] = SERIES_VARS[i % SERIES_VARS.length];
+    });
+    var weekSet = {};
+    rows.forEach(function (r) { weekSet[r.week] = true; });
+    state.weeks = Object.keys(weekSet).sort();
+    state.selectedChannels = new Set(state.channels);
+    state.selectedWeek = state.weeks.length ? state.weeks[state.weeks.length - 1] : null;
+    document.getElementById("sampleBanner").hidden = !isSample;
+    renderAll();
+  }
+
+  function sumMetric(rows, week, channels, key) {
+    var total = 0;
+    rows.forEach(function (r) {
+      if (r.week === week && channels.has(r.channel)) total += r[key];
+    });
+    return total;
+  }
+
+  // ---------- Rendering ----------
+  function safeRender(fn) {
+    try { fn(); } catch (e) { console.error(e); }
+  }
+
+  function renderAll() {
+    safeRender(renderWeekSelect);
+    safeRender(renderChips);
+    safeRender(renderKPIs);
+    safeRender(renderMetricTabs);
+    safeRender(renderGrowthChart);
+    safeRender(renderFunnel);
+    safeRender(renderTable);
+  }
+
+  function renderWeekSelect() {
+    var sel = document.getElementById("weekSelect");
+    sel.innerHTML = "";
+    if (!state.weeks.length) {
+      sel.disabled = true;
+      var opt = document.createElement("option");
+      opt.textContent = "No data";
+      sel.appendChild(opt);
+      return;
+    }
+    sel.disabled = false;
+    state.weeks.forEach(function (w) {
+      var opt = document.createElement("option");
+      opt.value = w;
+      opt.textContent = "Week of " + formatWeekLabel(w);
+      if (w === state.selectedWeek) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.onchange = function () { state.selectedWeek = sel.value; renderAll(); };
+  }
+
+  function renderChips() {
+    var container = document.getElementById("channelChips");
+    container.innerHTML = "";
+    state.channels.forEach(function (ch) {
+      var pressed = state.selectedChannels.has(ch);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chip";
+      btn.setAttribute("aria-pressed", String(pressed));
+      var dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background = "var(" + state.channelColor[ch] + ")";
+      btn.appendChild(dot);
+      btn.appendChild(document.createTextNode(ch));
+      btn.addEventListener("click", function () {
+        if (state.selectedChannels.has(ch)) {
+          if (state.selectedChannels.size === 1) return;
+          state.selectedChannels.delete(ch);
+        } else {
+          state.selectedChannels.add(ch);
+        }
+        renderAll();
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  function computeDelta(cur, prevExists, prev) {
+    if (!prevExists) return { text: "No prior week", cls: "muted" };
+    if (prev === 0) {
+      if (cur === 0) return { text: "flat", cls: "muted" };
+      return { text: "▲ New", cls: "good" };
+    }
+    var diff = cur - prev;
+    var pct = (diff / prev) * 100;
+    if (diff > 0) return { text: "▲ " + Math.abs(pct).toFixed(1) + "%", cls: "good" };
+    if (diff < 0) return { text: "▼ " + Math.abs(pct).toFixed(1) + "%", cls: "critical" };
+    return { text: "flat 0%", cls: "muted" };
+  }
+
+  function renderKPIs() {
+    var grid = document.getElementById("kpiGrid");
+    grid.innerHTML = "";
+    if (!state.selectedWeek) {
+      grid.innerHTML = '<div class="empty-state">No data loaded. Upload a CSV or reload the sample data.</div>';
+      return;
+    }
+    var weekIdx = state.weeks.indexOf(state.selectedWeek);
+    var prevWeek = weekIdx > 0 ? state.weeks[weekIdx - 1] : null;
+    METRICS.forEach(function (m) {
+      var cur = sumMetric(state.rows, state.selectedWeek, state.selectedChannels, m.key);
+      var prev = prevWeek !== null ? sumMetric(state.rows, prevWeek, state.selectedChannels, m.key) : 0;
+      var delta = computeDelta(cur, prevWeek !== null, prev);
+      var tile = document.createElement("div");
+      tile.className = "kpi-tile";
+      tile.innerHTML = '<div class="kpi-label">' + m.label + '</div>' +
+        '<div class="kpi-value">' + fmt(cur) + '</div>' +
+        '<div class="kpi-delta ' + delta.cls + '">' + delta.text + '</div>';
+      grid.appendChild(tile);
+    });
+  }
+
+  function renderMetricTabs() {
+    var container = document.getElementById("metricTabs");
+    container.innerHTML = "";
+    METRICS.forEach(function (m, i) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("role", "tab");
+      btn.id = "tab-" + m.key;
+      btn.setAttribute("aria-selected", String(state.metric === m.key));
+      btn.tabIndex = state.metric === m.key ? 0 : -1;
+      btn.textContent = m.label;
+      btn.addEventListener("click", function () { state.metric = m.key; renderAll(); });
+      btn.addEventListener("keydown", function (e) {
+        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+        e.preventDefault();
+        var dir = e.key === "ArrowRight" ? 1 : -1;
+        var next = METRICS[(i + dir + METRICS.length) % METRICS.length];
+        state.metric = next.key;
+        renderAll();
+        document.getElementById("tab-" + next.key).focus();
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  function renderGrowthChart() {
+    var canvas = document.getElementById("growthCanvas");
+    var fallback = document.getElementById("chartFallback");
+    var legend = document.getElementById("growthLegend");
+    legend.innerHTML = "";
+    var activeChannels = state.channels.filter(function (ch) { return state.selectedChannels.has(ch); });
+
+    activeChannels.forEach(function (ch) {
+      var item = document.createElement("span");
+      item.className = "item";
+      var dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background = "var(" + state.channelColor[ch] + ")";
+      item.appendChild(dot);
+      item.appendChild(document.createTextNode(ch));
+      legend.appendChild(item);
+    });
+
+    if (typeof Chart === "undefined") {
+      canvas.hidden = true;
+      fallback.hidden = false;
+      return;
+    }
+    canvas.hidden = false;
+    fallback.hidden = true;
+
+    if (!state.weeks.length) {
+      if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+      return;
+    }
+
+    var labels = state.weeks.map(formatWeekLabel);
+    var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var datasets = activeChannels.map(function (ch) {
+      var color = cssVar(state.channelColor[ch]);
+      return {
+        label: ch,
+        data: state.weeks.map(function (w) { return sumMetric(state.rows, w, new Set([ch]), state.metric); }),
+        borderColor: color,
+        backgroundColor: color,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        tension: 0.3
+      };
+    });
+
+    var ink = cssVar("--text-secondary");
+    var grid = cssVar("--gridline");
+
+    if (chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { labels: labels, datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: reduceMotion ? false : { duration: 400 },
+        plugins: { legend: { display: false }, tooltip: { mode: "index", intersect: false } },
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { ticks: { color: ink }, grid: { color: grid } },
+          y: { ticks: { color: ink }, grid: { color: grid }, beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  function renderFunnel() {
+    var container = document.getElementById("funnelStages");
+    container.innerHTML = "";
+    var week = state.selectedWeek;
+    var reach = week ? sumMetric(state.rows, week, state.selectedChannels, "reach") : 0;
+    var engagements = week ? sumMetric(state.rows, week, state.selectedChannels, "engagements") : 0;
+    var clicks = week ? sumMetric(state.rows, week, state.selectedChannels, "clicks") : 0;
+    var conversions = week ? sumMetric(state.rows, week, state.selectedChannels, "conversions") : 0;
+
+    var stages = [
+      { name: "Reach", value: reach, colorVar: "--seq-300" },
+      { name: "Engagement", value: engagements, colorVar: "--seq-400" },
+      { name: "Clicks", value: clicks, colorVar: "--seq-500" },
+      { name: "Sign-ups", value: conversions, colorVar: "--seq-600" }
+    ];
+    stages.forEach(function (s) {
+      var pct = reach > 0 ? (s.value / reach) * 100 : 0;
+      var row = document.createElement("div");
+      row.className = "funnel-stage";
+      row.innerHTML =
+        '<div class="stage-head"><span class="name">' + s.name + '</span>' +
+        '<span class="value">' + fmt(s.value) + (reach > 0 ? " · " + pct.toFixed(1) + "% of reach" : "") + '</span></div>' +
+        '<div class="funnel-track"><div class="funnel-fill" style="width:' + Math.min(100, Math.max(pct, s.value > 0 ? 1 : 0)) + '%; background: var(' + s.colorVar + ')"></div></div>';
+      container.appendChild(row);
+    });
+
+    document.getElementById("ctrValue").textContent = reach > 0 ? ((clicks / reach) * 100).toFixed(2) + "%" : "—";
+    document.getElementById("convValue").textContent = clicks > 0 ? ((conversions / clicks) * 100).toFixed(2) + "%" : "—";
+  }
+
+  function renderTable() {
+    var body = document.getElementById("detailBody");
+    var foot = document.getElementById("detailFoot");
+    body.innerHTML = "";
+    foot.innerHTML = "";
+    var week = state.selectedWeek;
+    var activeChannels = state.channels.filter(function (ch) { return state.selectedChannels.has(ch); });
+    if (!week || !activeChannels.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty-state">No data to show.</td></tr>';
+      return;
+    }
+    var totals = { reach: 0, engagements: 0, followers: 0, clicks: 0, conversions: 0 };
+    activeChannels.forEach(function (ch) {
+      var row = state.rows.find(function (r) { return r.week === week && r.channel === ch; });
+      var vals = row || { reach: 0, engagements: 0, followers: 0, clicks: 0, conversions: 0 };
+      METRICS.forEach(function (m) { totals[m.key] += vals[m.key]; });
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td><span class="ch-dot" style="background:var(' + state.channelColor[ch] + ')"></span>' + ch + '</td>' +
+        '<td>' + fmt(vals.reach) + '</td>' +
+        '<td>' + fmt(vals.engagements) + '</td>' +
+        '<td>' + fmt(vals.followers) + '</td>' +
+        '<td>' + fmt(vals.clicks) + '</td>' +
+        '<td>' + fmt(vals.conversions) + '</td>';
+      body.appendChild(tr);
+    });
+    foot.innerHTML = '<tr><td>Total</td><td>' + fmt(totals.reach) + '</td><td>' + fmt(totals.engagements) + '</td><td>' +
+      fmt(totals.followers) + '</td><td>' + fmt(totals.clicks) + '</td><td>' + fmt(totals.conversions) + '</td></tr>';
+  }
+
+  // ---------- Ingest ----------
+  function parseFiles(fileList) {
+    var files = Array.prototype.filter.call(fileList, function (f) { return /\.csv$/i.test(f.name); });
+    if (!files.length) return;
+    if (typeof Papa === "undefined") {
+      alert("CSV parser failed to load (offline / CDN blocked). Try the offline build (index.offline.html).");
+      return;
+    }
+    var pending = files.length;
+    var allRows = [];
+    files.forEach(function (file) {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function (results) {
+          allRows = allRows.concat(results.data || []);
+          pending--;
+          if (pending === 0) {
+            var normalized = normalizeRows(allRows);
+            loadRows(normalized, false);
+          }
+        },
+        error: function () {
+          pending--;
+          if (pending === 0) loadRows(normalizeRows(allRows), false);
+        }
+      });
+    });
+  }
+
+  function downloadTemplate() {
+    var blob = new Blob([TEMPLATE_CSV], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "comms_template.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // ---------- Theme ----------
+  var themeState = "system";
+  function applyTheme() {
+    var root = document.documentElement;
+    if (themeState === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", themeState);
+    document.getElementById("themeLabel").textContent = themeState.charAt(0).toUpperCase() + themeState.slice(1);
+    renderAll();
+  }
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    themeState = themeState === "system" ? "light" : themeState === "light" ? "dark" : "system";
+    applyTheme();
+  });
+
+  // ---------- Wire up ----------
+  var dropzone = document.getElementById("dropzone");
+  var fileInput = document.getElementById("fileInput");
+  fileInput.addEventListener("change", function () { parseFiles(fileInput.files); fileInput.value = ""; });
+  ["dragenter", "dragover"].forEach(function (evt) {
+    dropzone.addEventListener(evt, function (e) { e.preventDefault(); dropzone.classList.add("drag-over"); });
+  });
+  ["dragleave", "drop"].forEach(function (evt) {
+    dropzone.addEventListener(evt, function (e) { e.preventDefault(); dropzone.classList.remove("drag-over"); });
+  });
+  dropzone.addEventListener("drop", function (e) {
+    if (e.dataTransfer && e.dataTransfer.files) parseFiles(e.dataTransfer.files);
+  });
+
+  document.getElementById("templateBtn").addEventListener("click", downloadTemplate);
+  ["reloadSampleBtn", "reloadSampleBtn2"].forEach(function (id) {
+    document.getElementById(id).addEventListener("click", function () { loadRows(generateSampleData(), true); });
+  });
+  ["clearBtn", "clearBtn2"].forEach(function (id) {
+    document.getElementById(id).addEventListener("click", function () { loadRows([], false); });
+  });
+
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      if (themeState === "system") renderAll();
+    });
+  }
+
+  // ---------- Init ----------
+  loadRows(generateSampleData(), true);
+})();
+</script>
+</body>
+</html>
