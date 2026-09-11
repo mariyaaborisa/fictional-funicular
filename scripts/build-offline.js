@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /*
- * Regenerates index.offline.html from index.html by inlining the two
- * pinned libraries (PapaParse, Chart.js) so the offline build makes
- * zero external network requests.
+ * Regenerates index.offline.html from index.html by inlining the pinned
+ * libraries (PapaParse, Chart.js, SheetJS xlsx, jsPDF) so the offline build
+ * makes zero external network requests.
  *
  * Usage:  node scripts/build-offline.js
  * Requires: npm and tar on PATH, and network access to the npm registry
@@ -15,9 +15,13 @@ var os = require("os");
 var cp = require("child_process");
 
 var ROOT = path.join(__dirname, "..");
-var PAPAPARSE_VERSION = "5.4.1";
-var CHARTJS_VERSION = "4.4.4";
-var XLSX_VERSION = "0.18.5";
+
+var LIBS = [
+  { name: "PapaParse", pkg: "papaparse", version: "5.4.1", distFile: "papaparse.min.js", license: "MIT" },
+  { name: "Chart.js", pkg: "chart.js", version: "4.4.4", distFile: "dist/chart.umd.js", license: "MIT" },
+  { name: "SheetJS xlsx", pkg: "xlsx", version: "0.18.5", distFile: "dist/xlsx.full.min.js", license: "Apache-2.0" },
+  { name: "jsPDF", pkg: "jspdf", version: "2.5.2", distFile: "dist/jspdf.umd.min.js", license: "MIT" }
+];
 
 function run(cmd, args, cwd) {
   var res = cp.spawnSync(cmd, args, { cwd: cwd, stdio: "inherit" });
@@ -27,21 +31,15 @@ function run(cmd, args, cwd) {
 function main() {
   var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cdls-offline-"));
 
-  run("npm", ["pack", "papaparse@" + PAPAPARSE_VERSION, "chart.js@" + CHARTJS_VERSION, "xlsx@" + XLSX_VERSION], tmp);
+  run("npm", ["pack"].concat(LIBS.map(function (l) { return l.pkg + "@" + l.version; })), tmp);
 
-  var papaDir = path.join(tmp, "papaparse-pkg");
-  var chartDir = path.join(tmp, "chartjs-pkg");
-  var xlsxDir = path.join(tmp, "xlsx-pkg");
-  fs.mkdirSync(papaDir);
-  fs.mkdirSync(chartDir);
-  fs.mkdirSync(xlsxDir);
-  run("tar", ["xzf", path.join(tmp, "papaparse-" + PAPAPARSE_VERSION + ".tgz"), "-C", papaDir, "--strip-components=1"]);
-  run("tar", ["xzf", path.join(tmp, "chart.js-" + CHARTJS_VERSION + ".tgz"), "-C", chartDir, "--strip-components=1"]);
-  run("tar", ["xzf", path.join(tmp, "xlsx-" + XLSX_VERSION + ".tgz"), "-C", xlsxDir, "--strip-components=1"]);
-
-  var papaparseSrc = fs.readFileSync(path.join(papaDir, "papaparse.min.js"), "utf8");
-  var chartjsSrc = fs.readFileSync(path.join(chartDir, "dist", "chart.umd.js"), "utf8");
-  var xlsxSrc = fs.readFileSync(path.join(xlsxDir, "dist", "xlsx.full.min.js"), "utf8");
+  var inlined = LIBS.map(function (lib) {
+    var dir = path.join(tmp, lib.pkg + "-pkg");
+    fs.mkdirSync(dir);
+    run("tar", ["xzf", path.join(tmp, lib.pkg + "-" + lib.version + ".tgz"), "-C", dir, "--strip-components=1"]);
+    var src = fs.readFileSync(path.join(dir, lib.distFile), "utf8");
+    return "<script>\n/* " + lib.name + " " + lib.version + " (" + lib.license + ") - inlined for offline use */\n" + src + "\n</script>\n";
+  }).join("");
 
   var html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   var startMarker = "<!-- CDLS-BUILD:LIBS-START -->";
@@ -50,13 +48,7 @@ function main() {
   var endIdx = html.indexOf(endMarker);
   if (startIdx === -1 || endIdx === -1) throw new Error("Library markers not found in index.html");
 
-  var inlined =
-    startMarker + "\n" +
-    "<script>\n/* PapaParse " + PAPAPARSE_VERSION + " (MIT) - inlined for offline use */\n" + papaparseSrc + "\n</script>\n" +
-    "<script>\n/* Chart.js " + CHARTJS_VERSION + " (MIT) - inlined for offline use */\n" + chartjsSrc + "\n</script>\n" +
-    "<script>\n/* SheetJS xlsx " + XLSX_VERSION + " (Apache-2.0) - inlined for offline use */\n" + xlsxSrc + "\n</script>\n";
-
-  var out = html.slice(0, startIdx) + inlined + html.slice(endIdx + endMarker.length);
+  var out = html.slice(0, startIdx) + startMarker + "\n" + inlined + html.slice(endIdx + endMarker.length);
   fs.writeFileSync(path.join(ROOT, "index.offline.html"), out);
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log("Wrote index.offline.html (" + (out.length / 1024).toFixed(0) + " KB)");

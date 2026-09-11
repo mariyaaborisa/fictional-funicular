@@ -23,6 +23,8 @@ a link to a static file.
   open it, so there's always something to look at.
 - Drag in your own files (CSV, TSV, or Excel) and the sample data is
   replaced immediately.
+- Download a shareable PDF report — numbers plus a short plain-language
+  read of them — for the selected week, generated entirely in the browser.
 - Nothing you upload is ever saved, sent anywhere, or written to browser
   storage. Refresh the page and you're back to a clean slate.
 
@@ -62,12 +64,16 @@ Pinned dependencies:
 - [PapaParse](https://www.papaparse.com/) 5.4.1 (MIT) — CSV/TSV parsing, with automatic delimiter detection
 - [Chart.js](https://www.chartjs.org/) 4.4.4 (MIT) — the growth line chart
 - [SheetJS `xlsx`](https://sheetjs.com/) 0.18.5 (Apache-2.0) — Excel `.xlsx`/`.xls` parsing
+- [jsPDF](https://github.com/parallax/jsPDF) 2.5.2 (MIT) — the downloadable PDF report
 
 If Chart.js fails to load (blocked network, offline without the offline
 build), the growth chart shows a text fallback — the KPI tiles, funnel, and
-detail table are plain HTML/CSS and keep working regardless. If PapaParse or
-SheetJS fail to load, uploading that file type is disabled with a clear
-message (the app itself, and any already-loaded data, still works).
+detail table are plain HTML/CSS and keep working regardless, and the PDF
+report generates fine minus the chart image (with its own text fallback in
+its place). If PapaParse or SheetJS fail to load, uploading that file type
+is disabled with a clear message; if jsPDF fails to load, the PDF button
+shows a clear message instead of downloading (the app itself, and any
+already-loaded data, still works in every case).
 
 ## Ingesting data
 
@@ -210,6 +216,51 @@ reason this exists instead of the previous Looker Studio setup.
 - **Filters** — toggle channels on/off (at least one stays selected) and
   pick the reporting week; both apply to every view above.
 
+## PDF report
+
+"Download PDF report," next to the week selector, builds a one-to-two page
+PDF for the currently selected week and channel filter — same numbers as
+the screen, saved to a file (`pulse-report-YYYY-MM-DD.pdf`). Generated
+entirely client-side via a `Blob`; nothing is uploaded, no network request
+is made, and it works the same in the offline build. Contents, in order:
+
+1. Title, the selected week, and the date the report was generated.
+2. The five KPIs with their week-over-week change.
+3. The funnel (Reach → Engagement → Clicks → Sign-ups) with the
+   click-through and conversion rates.
+4. The growth chart as an image (skipped with a text note if Chart.js
+   didn't load — the rest of the report is unaffected).
+5. The per-channel detail table for the week.
+6. **"What this means"** — a short plain-language interpretation.
+7. A footer noting the report contains aggregate counts only.
+
+If the sample dataset is loaded, the report is stamped **SAMPLE DATA** so
+it's never mistaken for a real week's reporting.
+
+### About the interpretation
+
+The "What this means" section is **rule-based text computed from the
+numbers already in memory — not an AI call, not a causal analysis.** It
+states the week-over-week direction and size of reach/engagement/
+followers/sign-ups; names this week's funnel bottleneck (the stage with the
+weakest conversion rate *relative to the stage before it*, e.g. "clicks are
+healthy, but sign-ups lag"), with today's click-through and conversion
+rates against the trailing average of up to the prior 4 weeks; and names
+the top channel by reach, by engagement rate, and by sign-ups, flagging any
+channel with an unusually large week-over-week move. It always closes with
+a caveat that reach isn't de-duplicated across platforms and that these are
+observations, not explanations of *why* something moved.
+
+It's deliberately simple and transparent on purpose: a non-analyst operator
+can read every sentence back to the arithmetic that produced it, and so can
+you. All of the rules and their tunable thresholds (how many weeks count as
+"short history," the trailing-average window, what counts as a "notable"
+move) live in one block in `index.html`, marked
+`// ---------- Report interpretation rules (plain-language, rule-based) ----------`.
+To change the
+wording or a threshold, edit that block — nothing else in the app depends
+on it.
+
 ## Repository structure
 
 ```
@@ -235,5 +286,5 @@ source of record; this tool is a stateless read-out of it.
 
 This project is MIT — see [LICENSE](LICENSE). Fork it, host it yourself,
 hand it to the next cohort. Bundled third-party libraries keep their own
-licenses (PapaParse and Chart.js are MIT; SheetJS `xlsx` is Apache-2.0),
-noted above where each is pinned.
+licenses (PapaParse, Chart.js, and jsPDF are MIT; SheetJS `xlsx` is
+Apache-2.0), noted above where each is pinned.

@@ -266,6 +266,10 @@
         <span class="group-label" id="channelChipsLabel">Channels</span>
         <div class="chip-row" id="channelChips" role="group" aria-labelledby="channelChipsLabel"></div>
       </div>
+      <div class="filter-group">
+        <span class="group-label">&nbsp;</span>
+        <button type="button" id="pdfReportBtn">⬇ Download PDF report</button>
+      </div>
     </div>
   </section>
 
@@ -326,6 +330,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
 <!-- CDLS-BUILD:LIBS-END -->
 <script>
 (function () {
@@ -953,6 +958,330 @@
       fmt(totals.followers) + '</td><td>' + fmt(totals.clicks) + '</td><td>' + fmt(totals.conversions) + '</td></tr>';
   }
 
+  // ---------- Report interpretation rules (plain-language, rule-based) ----------
+  // Everything here is arithmetic over rows already in memory - no AI call,
+  // nothing leaves the browser. Kept in one block, with thresholds as named
+  // constants, so a future cohort can retune the wording or cutoffs without
+  // touching rendering, ingestion, or PDF layout code elsewhere in the file.
+  var INTERP_SHORT_HISTORY_WEEKS = 3; // below this many weeks loaded, flag trends as "still early"
+  var INTERP_TRAILING_WEEKS = 4; // how many prior weeks feed the CTR/conversion baseline
+  var INTERP_NOTABLE_MOVE_PCT = 25; // WoW %% change on a channel's reach worth calling out
+  var INTERP_MAX_NOTABLE_MOVERS = 2; // cap how many flagged channels make it into the sentence
+
+  function computeFunnelForWeek(week, channels) {
+    var reach = sumMetric(state.rows, week, channels, "reach");
+    var engagements = sumMetric(state.rows, week, channels, "engagements");
+    var clicks = sumMetric(state.rows, week, channels, "clicks");
+    var conversions = sumMetric(state.rows, week, channels, "conversions");
+    return {
+      reach: reach, engagements: engagements, clicks: clicks, conversions: conversions,
+      ctr: reach > 0 ? clicks / reach : null,
+      convRate: clicks > 0 ? conversions / clicks : null
+    };
+  }
+
+  function trailingAverage(weeks, channels, pick) {
+    var vals = weeks.map(function (w) { return pick(computeFunnelForWeek(w, channels)); }).filter(function (v) { return v !== null; });
+    if (!vals.length) return null;
+    return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+  }
+
+  function growthSentence(label, cur, prev) {
+    if (prev === 0) {
+      if (cur === 0) return label + " stayed flat at 0 this week.";
+      return label + " is new this week (" + fmt(cur) + ") with no prior week to compare.";
+    }
+    var diff = cur - prev, pct = Math.abs((diff / prev) * 100);
+    if (diff > 0) return label + " rose " + pct.toFixed(0) + "% from last week.";
+    if (diff < 0) return label + " fell " + pct.toFixed(0) + "% from last week.";
+    return label + " held steady week-over-week.";
+  }
+
+  // Returns an array of paragraph strings for the PDF's "What this means" section.
+  function buildInterpretation(week, channelSet) {
+    var paragraphs = [];
+    var idx = state.weeks.indexOf(week);
+    var prevWeek = idx > 0 ? state.weeks[idx - 1] : null;
+    var channels = Array.from(channelSet);
+
+    // Growth
+    var growthMetrics = [
+      { key: "reach", label: "Reach" },
+      { key: "engagements", label: "Engagement" },
+      { key: "followers", label: "Followers" },
+      { key: "conversions", label: "Sign-ups" }
+    ];
+    if (prevWeek) {
+      var growthSentences = growthMetrics.map(function (m) {
+        var cur = sumMetric(state.rows, week, channelSet, m.key);
+        var prev = sumMetric(state.rows, prevWeek, channelSet, m.key);
+        return growthSentence(m.label, cur, prev);
+      });
+      paragraphs.push(growthSentences.join(" "));
+    } else {
+      paragraphs.push("This is the earliest week in the loaded data, so there's no prior week to compare against yet.");
+    }
+    if (state.weeks.length < INTERP_SHORT_HISTORY_WEEKS) {
+      paragraphs.push("Only " + state.weeks.length + " week" + (state.weeks.length === 1 ? "" : "s") +
+        " of data " + (state.weeks.length === 1 ? "is" : "are") + " loaded so far, so week-over-week trends are still early.");
+    }
+
+    // Funnel bottleneck: compare each stage to the ONE BEFORE it (not to reach),
+    // so the bottleneck is the weakest conditional step, not always "engagement"
+    // just because everything looks small next to reach.
+    var f = computeFunnelForWeek(week, channelSet);
+    if (f.reach > 0) {
+      var transitions = [
+        { name: "Engagement", rate: f.reach > 0 ? f.engagements / f.reach : null },
+        { name: "Clicks", rate: f.engagements > 0 ? f.clicks / f.engagements : null },
+        { name: "Sign-ups", rate: f.clicks > 0 ? f.conversions / f.clicks : null }
+      ].filter(function (t) { return t.rate !== null; });
+      var worst = transitions.length ? transitions.reduce(function (a, b) { return b.rate < a.rate ? b : a; }) : null;
+      var stepLabel = worst ? (worst.name === "Sign-ups" ? "sign-up step" : worst.name === "Clicks" ? "click step" : "engagement step") : null;
+
+      var priorWeeks = state.weeks.slice(Math.max(0, idx - INTERP_TRAILING_WEEKS), idx);
+      var trailingCTR = trailingAverage(priorWeeks, channelSet, function (r) { return r.ctr; });
+      var trailingConv = trailingAverage(priorWeeks, channelSet, function (r) { return r.convRate; });
+
+      var sentence = stepLabel
+        ? ("This week's bottleneck is the " + stepLabel + " - it has the largest relative drop-off from the stage before it.")
+        : "There isn't enough stage-to-stage data this week to name a clear bottleneck.";
+      var bits = [];
+      if (f.ctr !== null) bits.push("click-through rate is " + (f.ctr * 100).toFixed(1) + "%" + (trailingCTR !== null ? " (trailing " + priorWeeks.length + "-week average " + (trailingCTR * 100).toFixed(1) + "%)" : ""));
+      if (f.convRate !== null) bits.push("conversion rate is " + (f.convRate * 100).toFixed(1) + "%" + (trailingConv !== null ? " (trailing average " + (trailingConv * 100).toFixed(1) + "%)" : ""));
+      if (bits.length) sentence += " This week's " + bits.join(" and ") + ".";
+      paragraphs.push(sentence);
+    } else {
+      paragraphs.push("No reach was recorded for the selected channels this week, so a funnel comparison isn't meaningful.");
+    }
+
+    // Channels
+    var channelRows = channels.map(function (ch) {
+      var single = new Set([ch]);
+      return {
+        channel: ch,
+        reach: sumMetric(state.rows, week, single, "reach"),
+        engagements: sumMetric(state.rows, week, single, "engagements"),
+        conversions: sumMetric(state.rows, week, single, "conversions")
+      };
+    });
+    var topReach = channelRows.slice().sort(function (a, b) { return b.reach - a.reach; })[0];
+    var topEngRate = channelRows.filter(function (c) { return c.reach > 0; })
+      .map(function (c) { return { channel: c.channel, rate: c.engagements / c.reach }; })
+      .sort(function (a, b) { return b.rate - a.rate; })[0];
+    var topSignups = channelRows.slice().sort(function (a, b) { return b.conversions - a.conversions; })[0];
+
+    var chBits = [];
+    if (topReach && topReach.reach > 0) chBits.push(topReach.channel + " led on reach");
+    if (topEngRate) chBits.push(topEngRate.channel + " had the strongest engagement rate");
+    if (topSignups && topSignups.conversions > 0) chBits.push(topSignups.channel + " produced the most sign-ups");
+    var channelSentence = chBits.length ? (chBits.join(", ") + " this week.") : "There was no channel activity to compare this week.";
+
+    if (prevWeek) {
+      var movers = channels.map(function (ch) {
+        var single = new Set([ch]);
+        var cur = sumMetric(state.rows, week, single, "reach");
+        var prev = sumMetric(state.rows, prevWeek, single, "reach");
+        if (prev <= 0) return null;
+        var pct = ((cur - prev) / prev) * 100;
+        return Math.abs(pct) >= INTERP_NOTABLE_MOVE_PCT ? { channel: ch, pct: pct } : null;
+      }).filter(Boolean).sort(function (a, b) { return Math.abs(b.pct) - Math.abs(a.pct); }).slice(0, INTERP_MAX_NOTABLE_MOVERS);
+      if (movers.length) {
+        channelSentence += " Notable moves: " + movers.map(function (m) {
+          return m.channel + " reach " + (m.pct > 0 ? "up" : "down") + " " + Math.abs(m.pct).toFixed(0) + "%";
+        }).join(", ") + ".";
+      }
+    }
+    paragraphs.push(channelSentence);
+
+    paragraphs.push("Note: reach is not de-duplicated across platforms, and these are observations drawn from the numbers above — not explanations of why they moved.");
+
+    return paragraphs;
+  }
+
+  // ---------- PDF report ----------
+  function generatePdfReport() {
+    if (!state.selectedWeek) { alert("No data loaded to report on."); return; }
+    if (typeof window.jspdf === "undefined") {
+      alert("PDF library failed to load (offline / CDN blocked). Try the offline build (index.offline.html).");
+      return;
+    }
+    var week = state.selectedWeek;
+    var channelSet = state.selectedChannels;
+    var activeChannels = state.channels.filter(function (ch) { return channelSet.has(ch); });
+
+    var doc = new window.jspdf.jsPDF({ unit: "pt", format: "letter" });
+    var pageW = doc.internal.pageSize.getWidth();
+    var pageH = doc.internal.pageSize.getHeight();
+    var margin = 40;
+    var contentW = pageW - margin * 2;
+    var y = margin;
+
+    // jsPDF's base "helvetica" font uses WinAnsi encoding, which covers em
+    // dashes and curly quotes but not arrows or triangles - swap those for
+    // ASCII equivalents so PDF text never mis-encodes.
+    function pdfSafeText(text) {
+      return String(text).replace(/▲\s*/g, "+").replace(/▼\s*/g, "-").replace(/→/g, "->");
+    }
+    function ensureSpace(needed) {
+      if (y + needed > pageH - margin) { doc.addPage(); y = margin; }
+    }
+    function heading(text, size) {
+      ensureSpace(size + 10);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(size); doc.setTextColor(20, 20, 20);
+      doc.text(text, margin, y);
+      y += size + 8;
+    }
+    function bodyText(text, size, color) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(size || 10);
+      doc.setTextColor(color ? color[0] : 60, color ? color[1] : 60, color ? color[2] : 60);
+      var lines = doc.splitTextToSize(text, contentW);
+      lines.forEach(function (line) {
+        ensureSpace((size || 10) + 4);
+        doc.text(line, margin, y);
+        y += (size || 10) + 4;
+      });
+    }
+
+    // Header
+    heading("Pulse — Weekly Report", 18);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.setTextColor(40, 40, 40);
+    doc.text("Week of " + formatWeekLabel(week), margin, y); y += 16;
+    doc.setFontSize(9); doc.setTextColor(120, 120, 120);
+    doc.text("Generated on " + new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }), margin, y); y += 10;
+    doc.text("Channels: " + (activeChannels.length ? activeChannels.join(", ") : "none selected"), margin, y); y += 18;
+
+    if (state.isSample) {
+      doc.setFillColor(250, 178, 25);
+      doc.rect(margin, y - 12, 110, 18, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(20, 20, 20);
+      doc.text("SAMPLE DATA", margin + 8, y + 1);
+      y += 22;
+    }
+
+    // KPIs
+    heading("Key numbers", 13);
+    var weekIdx = state.weeks.indexOf(week);
+    var prevWeek = weekIdx > 0 ? state.weeks[weekIdx - 1] : null;
+    METRICS.forEach(function (m) {
+      var cur = sumMetric(state.rows, week, channelSet, m.key);
+      var prev = prevWeek !== null ? sumMetric(state.rows, prevWeek, channelSet, m.key) : 0;
+      var delta = computeDelta(cur, prevWeek !== null, prev);
+      ensureSpace(14);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(30, 30, 30);
+      doc.text(m.label + ": " + fmt(cur), margin, y);
+      doc.setFontSize(9); doc.setTextColor(110, 110, 110);
+      doc.text(pdfSafeText(delta.text), margin + 220, y);
+      y += 16;
+    });
+    y += 8;
+
+    // Funnel
+    heading("Funnel - Reach -> Engagement -> Clicks -> Sign-ups", 13);
+    var f = computeFunnelForWeek(week, channelSet);
+    var stages = [
+      { name: "Reach", value: f.reach, pct: 100 },
+      { name: "Engagement", value: f.engagements, pct: f.reach > 0 ? (f.engagements / f.reach) * 100 : 0 },
+      { name: "Clicks", value: f.clicks, pct: f.reach > 0 ? (f.clicks / f.reach) * 100 : 0 },
+      { name: "Sign-ups", value: f.conversions, pct: f.reach > 0 ? (f.conversions / f.reach) * 100 : 0 }
+    ];
+    stages.forEach(function (s) {
+      ensureSpace(14);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+      doc.text(s.name + ": " + fmt(s.value) + " (" + s.pct.toFixed(1) + "% of reach)", margin, y);
+      y += 15;
+    });
+    ensureSpace(16);
+    doc.setFontSize(10.5);
+    doc.text("Click-through rate: " + (f.ctr !== null ? (f.ctr * 100).toFixed(2) + "%" : "—") +
+      "    Conversion rate: " + (f.convRate !== null ? (f.convRate * 100).toFixed(2) + "%" : "—"), margin, y);
+    y += 22;
+
+    // Growth chart image
+    if (chartInstance && document.getElementById("growthCanvas").hidden === false) {
+      try {
+        var canvas = document.getElementById("growthCanvas");
+        var imgData = canvas.toDataURL("image/png");
+        var imgW = contentW;
+        var imgH = imgW * (canvas.height / canvas.width);
+        ensureSpace(imgH + 24);
+        heading("Growth — " + METRICS.find(function (m) { return m.key === state.metric; }).label, 13);
+        doc.addImage(imgData, "PNG", margin, y, imgW, imgH);
+        y += imgH + 16;
+      } catch (e) {
+        console.error(e);
+        bodyText("Growth chart image unavailable.", 10);
+      }
+    } else {
+      heading("Growth", 13);
+      bodyText("Chart unavailable in this session (chart library failed to load). See the detail table below for the same numbers.", 10);
+      y += 6;
+    }
+
+    // Detail table
+    heading("Detail — by channel", 13);
+    var cols = [
+      { label: "Channel", x: margin, w: 130, align: "left" },
+      { label: "Reach", x: margin + 130, w: 65, align: "right" },
+      { label: "Engage.", x: margin + 195, w: 65, align: "right" },
+      { label: "Followers", x: margin + 260, w: 70, align: "right" },
+      { label: "Clicks", x: margin + 330, w: 65, align: "right" },
+      { label: "Sign-ups", x: margin + 395, w: 65, align: "right" }
+    ];
+    ensureSpace(16);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
+    cols.forEach(function (c) { doc.text(c.label, c.x + (c.align === "right" ? c.w : 0), y, { align: c.align }); });
+    y += 6;
+    doc.setDrawColor(210, 210, 210);
+    doc.line(margin, y, margin + 460, y);
+    y += 12;
+
+    var totals = { reach: 0, engagements: 0, followers: 0, clicks: 0, conversions: 0 };
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
+    activeChannels.forEach(function (ch) {
+      var row = state.rows.find(function (r) { return r.week === week && r.channel === ch; });
+      var vals = row || { reach: 0, engagements: 0, followers: 0, clicks: 0, conversions: 0 };
+      METRICS.forEach(function (m) { totals[m.key] += vals[m.key]; });
+      ensureSpace(14);
+      doc.text(ch, cols[0].x, y);
+      doc.text(fmt(vals.reach), cols[1].x + cols[1].w, y, { align: "right" });
+      doc.text(fmt(vals.engagements), cols[2].x + cols[2].w, y, { align: "right" });
+      doc.text(fmt(vals.followers), cols[3].x + cols[3].w, y, { align: "right" });
+      doc.text(fmt(vals.clicks), cols[4].x + cols[4].w, y, { align: "right" });
+      doc.text(fmt(vals.conversions), cols[5].x + cols[5].w, y, { align: "right" });
+      y += 14;
+    });
+    ensureSpace(16);
+    doc.setDrawColor(210, 210, 210);
+    doc.line(margin, y, margin + 460, y);
+    y += 12;
+    doc.setFont("helvetica", "bold");
+    doc.text("Total", cols[0].x, y);
+    doc.text(fmt(totals.reach), cols[1].x + cols[1].w, y, { align: "right" });
+    doc.text(fmt(totals.engagements), cols[2].x + cols[2].w, y, { align: "right" });
+    doc.text(fmt(totals.followers), cols[3].x + cols[3].w, y, { align: "right" });
+    doc.text(fmt(totals.clicks), cols[4].x + cols[4].w, y, { align: "right" });
+    doc.text(fmt(totals.conversions), cols[5].x + cols[5].w, y, { align: "right" });
+    y += 22;
+
+    // Interpretation
+    heading("What this means", 13);
+    bodyText("Plain-language read of the numbers above, generated locally by simple rules — not a causal analysis.", 9, [120, 120, 120]);
+    y += 4;
+    buildInterpretation(week, channelSet).forEach(function (para) { bodyText(para, 10.5); y += 4; });
+
+    // Footer on every page
+    var pageCount = doc.internal.getNumberOfPages();
+    for (var p = 1; p <= pageCount; p++) {
+      doc.setPage(p);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
+      doc.text("This report contains aggregate counts only — no personal data. Generated entirely in your browser; nothing was uploaded.", margin, pageH - 20);
+      doc.text(String(p) + " / " + pageCount, pageW - margin, pageH - 20, { align: "right" });
+    }
+
+    doc.save("pulse-report-" + week + ".pdf");
+  }
+
   // ---------- Ingest ----------
   // Accepts CSV, TSV (via PapaParse, which auto-detects the delimiter) and
   // Excel .xlsx/.xls (via SheetJS, first sheet) - returns an array of raw
@@ -1212,6 +1541,7 @@
   });
 
   document.getElementById("templateBtn").addEventListener("click", downloadTemplate);
+  document.getElementById("pdfReportBtn").addEventListener("click", generatePdfReport);
   ["reloadSampleBtn", "reloadSampleBtn2"].forEach(function (id) {
     document.getElementById(id).addEventListener("click", function () { loadRows(generateSampleData(), true); });
   });
