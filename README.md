@@ -1,4 +1,4 @@
-# CDLS Comms Pulse
+# Pulser
 
 A freestanding, client-side weekly communications dashboard. Drop in CSV exports
 from each channel and immediately see growth trends and a click→sign-up funnel
