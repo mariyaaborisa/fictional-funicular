@@ -2,7 +2,12 @@
 /*
  * Regenerates index.offline.html from index.html by inlining the pinned
  * libraries (PapaParse, Chart.js, SheetJS xlsx, jsPDF) so the offline build
- * makes zero external network requests.
+ * makes zero external network requests. Also strips the CDN-only Google
+ * Fonts block (index.html's --font-heading/--font-body override + <link>
+ * tags), leaving the base :root's system font stack as the only definition
+ * -- per the project rule that the offline build has no Google Fonts
+ * dependency and looks the same on every machine regardless of what's
+ * locally installed.
  *
  * Usage:  node scripts/build-offline.js
  * Requires: npm and tar on PATH, and network access to the npm registry
@@ -42,6 +47,14 @@ function main() {
   }).join("");
 
   var html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+
+  var fontsStart = "<!-- CDLS-BUILD:FONTS-START -->";
+  var fontsEnd = "<!-- CDLS-BUILD:FONTS-END -->";
+  var fontsStartIdx = html.indexOf(fontsStart);
+  var fontsEndIdx = html.indexOf(fontsEnd);
+  if (fontsStartIdx === -1 || fontsEndIdx === -1) throw new Error("Fonts markers not found in index.html");
+  html = html.slice(0, fontsStartIdx) + html.slice(fontsEndIdx + fontsEnd.length);
+
   var startMarker = "<!-- CDLS-BUILD:LIBS-START -->";
   var endMarker = "<!-- CDLS-BUILD:LIBS-END -->";
   var startIdx = html.indexOf(startMarker);

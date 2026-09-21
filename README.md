@@ -45,8 +45,8 @@ serve the file.
 
 | File | Use when | Network calls |
 |---|---|---|
-| `index.html` | The usual choice. Hosted or local, internet available. | Loads PapaParse and Chart.js from cdnjs the first time it opens. |
-| `index.offline.html` | A machine with no internet, a locked-down network, or when you want a file you can prove makes no network calls. | None. Both libraries are built in. |
+| `index.html` | The usual choice. Hosted or local, internet available. | Loads PapaParse, Chart.js, SheetJS, and jsPDF from cdnjs, plus Open Sans/Montserrat from Google Fonts, the first time it opens. |
+| `index.offline.html` | A machine with no internet, a locked-down network, or when you want a file you can prove makes no network calls. | None. Every library is built in, and typography falls back to the system font stack. |
 
 The two files are otherwise the same and come from the same source. To rebuild
 `index.offline.html` after you edit `index.html`, run:
@@ -74,6 +74,15 @@ with a text note in place of the chart image. If PapaParse or SheetJS do not
 load, uploading that file type is turned off with a clear message. If jsPDF does
 not load, the PDF button shows a message instead of downloading. In every one of
 these cases the app itself, and any data you have already loaded, keep working.
+
+### Typography
+
+Headings use Open Sans, body text uses Montserrat, both loaded from Google
+Fonts in `index.html` only, with the system font stack (`system-ui`,
+`-apple-system`, `"Segoe UI"`, `sans-serif`) as the fallback if the fonts do
+not load. `index.offline.html` never references Google Fonts at all — the
+build script strips that block entirely, so the offline version always
+renders in the system stack, the same way on every machine.
 
 ## Adding your data
 
