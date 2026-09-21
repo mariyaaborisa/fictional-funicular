@@ -1,353 +1,347 @@
 # Pulser
 
-A freestanding, client-side weekly communications dashboard. Drop in raw
-exports from each channel — CSV, TSV, or Excel — and immediately see growth
-trends and a click→sign-up funnel across every channel — reach, engagement,
+A weekly communications dashboard that runs entirely in your browser. Drop in
+the raw exports from each channel (CSV, TSV, or Excel) and see your growth
+trends and a click-to-signup funnel across every channel: reach, engagement,
 followers, clicks, and sign-ups, week over week.
 
-**No accounts. No backend. No data leaves your browser.**
-
-This exists because the previous approach (Looker Studio + a shared Google
-Drive) tied access to Google accounts and Drive permissions — for a team that
-rotates operators every ~10 weeks, that meant recurring account provisioning,
-permission sprawl, and data left orphaned when someone's account was
-deprovisioned. This tool has nothing to provision and nothing to hand off but
-a link to a static file.
+This is a first version (an MVP) built for CDLS. The point is to find where the
+current reporting process creates friction, and to build strategy around making
+analytics a foundational part of how the team works rather than an afterthought.
+It's an extra step in the workflow, but it keeps data processing and access to a
+minimum, which matters both for security and for handing things off between
+cohorts.
 
 ## What it is
 
-- A single HTML file (`index.html`) with inline CSS and JS — no build step,
-  no server.
-- Opens directly from disk (`file://`) or from any static host.
-- Renders a fully populated dashboard with **sample data** the first time you
-  open it, so there's always something to look at.
-- Drag in your own files (CSV, TSV, or Excel) and the sample data is
-  replaced immediately.
-- Download a shareable PDF report — numbers plus a short plain-language
-  read of them — for the selected week, generated entirely in the browser.
-- Nothing you upload is ever saved, sent anywhere, or written to browser
-  storage. Refresh the page and you're back to a clean slate.
+- One HTML file (`index.html`) with the styling and code built in. There is no
+  build step and no server.
+- It opens straight from your computer (`file://`) or from any web host.
+- The first time you open it, it fills itself with sample numbers so there is
+  always something on screen.
+- Drag in your own files (CSV, TSV, or Excel) and the sample numbers are
+  replaced right away.
+- You can download a shareable PDF report for the week you are looking at:
+  the numbers plus a short plain-language read of them, all put together in
+  the browser.
+- Nothing you upload is saved, sent anywhere, or kept in the browser. Refresh
+  the page and you are back to a clean start.
 
 ## How to run it
 
-**Locally:** double-click `index.html` (or `index.offline.html`, see below).
-That's it.
+Locally: double-click `index.html` (or `index.offline.html`, described below).
+That is all.
 
-**Hosted (GitHub Pages):**
+Hosted on GitHub Pages:
+
 1. Push this repo to GitHub.
-2. Repo Settings → Pages → deploy from the default branch, root folder.
-3. Your dashboard is live at the Pages URL. No environment variables, no
-   secrets, no config.
+2. Go to Settings, then Pages, and deploy from the default branch, root folder.
+3. Your dashboard is live at the Pages URL. There is nothing else to configure.
 
-Any other static host (Netlify, S3, a plain nginx directory) works the same
-way — just serve the file.
+Any other web host (Netlify, S3, a plain nginx folder) works the same way. Just
+serve the file.
 
-## Two build modes
+## Two versions of the file
 
 | File | Use when | Network calls |
 |---|---|---|
-| `index.html` | Default. Hosted or local, internet available. | Loads PapaParse + Chart.js from cdnjs on first load. |
-| `index.offline.html` | Air-gapped machine, restricted network, or you want a provably zero-network artifact. | None — both libraries are inlined. |
+| `index.html` | The usual choice. Hosted or local, internet available. | Loads PapaParse and Chart.js from cdnjs the first time it opens. |
+| `index.offline.html` | A machine with no internet, a locked-down network, or when you want a file you can prove makes no network calls. | None. Both libraries are built in. |
 
-Both files are otherwise identical and built from the same source. To
-regenerate `index.offline.html` (e.g. after editing `index.html`), run:
+The two files are otherwise the same and come from the same source. To rebuild
+`index.offline.html` after you edit `index.html`, run:
 
 ```
 node scripts/build-offline.js
 ```
 
 This pulls the pinned library versions from the npm registry at build time
-only, inlines them, and writes `index.offline.html`. The generated file
-itself makes no external requests — verify in your browser's Network tab.
+only, folds them into the file, and writes `index.offline.html`. The file it
+produces makes no outside requests. You can confirm this in your browser's
+Network tab.
 
-Pinned dependencies:
-- [PapaParse](https://www.papaparse.com/) 5.4.1 (MIT) — CSV/TSV parsing, with automatic delimiter detection
-- [Chart.js](https://www.chartjs.org/) 4.4.4 (MIT) — the growth line chart
-- [SheetJS `xlsx`](https://sheetjs.com/) 0.18.5 (Apache-2.0) — Excel `.xlsx`/`.xls` parsing
-- [jsPDF](https://github.com/parallax/jsPDF) 2.5.2 (MIT) — the downloadable PDF report
+Pinned libraries:
 
-If Chart.js fails to load (blocked network, offline without the offline
-build), the growth chart shows a text fallback — the KPI tiles, funnel, and
-detail table are plain HTML/CSS and keep working regardless, and the PDF
-report generates fine minus the chart image (with its own text fallback in
-its place). If PapaParse or SheetJS fail to load, uploading that file type
-is disabled with a clear message; if jsPDF fails to load, the PDF button
-shows a clear message instead of downloading (the app itself, and any
-already-loaded data, still works in every case).
+- [PapaParse](https://www.papaparse.com/) 5.4.1 (MIT), for reading CSV and TSV, with the delimiter detected for you
+- [Chart.js](https://www.chartjs.org/) 4.4.4 (MIT), for the growth line chart
+- [SheetJS `xlsx`](https://sheetjs.com/) 0.18.5 (Apache-2.0), for reading Excel `.xlsx` and `.xls` files
+- [jsPDF](https://github.com/parallax/jsPDF) 2.5.2 (MIT), for the downloadable PDF report
 
-## Ingesting data
+If Chart.js does not load (a blocked network, or offline without the offline
+version), the growth chart shows a text version instead. The KPI tiles, funnel,
+and detail table are plain HTML and keep working. The PDF report still generates,
+with a text note in place of the chart image. If PapaParse or SheetJS do not
+load, uploading that file type is turned off with a clear message. If jsPDF does
+not load, the PDF button shows a message instead of downloading. In every one of
+these cases the app itself, and any data you have already loaded, keep working.
 
-Drop in **CSV, TSV, or Excel (`.xlsx`/`.xls`)** files — one or more at once,
-mixed types and mixed platforms in the same drop are fine. Each non-Excel
-file is decoded first (UTF-8 or UTF-16, auto-detected — see "Format Mix
-exports" below), then routed through one of four paths, tried in order.
-Growth/funnel data from every matched file in the batch is merged into one
-dataset in a final pass; Format Mix data (see below) is kept entirely
-separate and never joins it:
+## Adding your data
 
-1. **A Format Mix export** — a Meta/Instagram "Top content formats" file
-   (detected by its distinctive stacked-section shape, not a header row).
-   Routed to the separate **Format Mix** view, never the funnel — see
+Drop in CSV, TSV, or Excel (`.xlsx` or `.xls`) files, one or several at once.
+Mixing file types and platforms in the same drop is fine. Each non-Excel file
+is read first (UTF-8 or UTF-16, detected for you, see "Format Mix exports"
+below), then sent down one of four paths, tried in order. Growth and funnel
+data from every file that matched is combined into one set at the end. Format
+Mix data (below) is kept fully separate and never mixes into it.
+
+1. A Format Mix export: a Meta or Instagram "Top content formats" file,
+   recognized by its distinctive stacked-section shape rather than a header
+   row. This goes to the separate Format Mix view, never the funnel. See
    "Format Mix exports" below.
-2. **Canonical schema** — the file already has `week` and `channel` columns
-   (see below). Used as-is.
-3. **A platform adapter** — the file's columns match a known raw export
-   (see "Platform adapters" below). Detected automatically by column
-   signature (with a filename hint as a tiebreaker) and reshaped to weekly.
-4. **Manual mapping** — none of the above matched. Instead of failing,
-   the app shows a one-time mapping step: it lists the file's columns and
-   lets you assign each to a canonical field (and type in a fixed
-   channel/week if the file doesn't have those as columns). This is
-   **session-only** — nothing about the mapping is saved — and it's the
-   resilience valve for a platform quietly changing its export format: a
-   broken adapter degrades to "map it yourself," never a broken tool.
+2. The standard layout: the file already has `week` and `channel` columns
+   (described below). Used as is.
+3. A platform adapter: the file's columns match a known raw export (see
+   "Platform adapters" below). The app spots this on its own from the columns
+   (using the filename as a tiebreaker) and reshapes the file to weekly rows.
+4. Map it yourself: none of the above matched. Rather than failing, the app
+   shows a one-time step that lists the file's columns and lets you assign
+   each one to a field (and type in a fixed channel or week if the file does
+   not have those as columns). This lasts only for the current session,
+   nothing about it is saved. It is also the fallback for a platform quietly
+   changing its export format: a broken adapter drops to "map it yourself"
+   rather than leaving you stuck.
 
-A row missing both a resolvable date and a channel is skipped silently
-rather than failing the whole batch.
+A row with no readable date and no channel is skipped quietly rather than
+failing the whole batch.
 
-### The canonical schema
+### The standard layout
 
-One row per **channel × ISO week** (week start = Monday).
+One row per channel per ISO week (a week starts on Monday).
 
 | Column | Type | Meaning |
 |---|---|---|
-| `week` | date, `YYYY-MM-DD` | **Required.** Join key. |
-| `channel` | string | **Required.** e.g. Instagram, Facebook, LinkedIn, Linktree, Forms, Newsletter. |
-| `reach` | number | People who saw content. Falls back to `impressions` if the column is absent. |
+| `week` | date, `YYYY-MM-DD` | Required. The join key. |
+| `channel` | text | Required. For example Instagram, Facebook, LinkedIn, Linktree, Forms, Newsletter. |
+| `reach` | number | People who saw content. Falls back to `impressions` if this column is missing. |
 | `impressions` | number | Raw views. |
-| `engagements` | number | Likes + comments + shares + saves (or entered directly). |
-| `followers` | number | Running follower/subscriber total. |
-| `clicks` | number | Outbound/link clicks (Linktree taps, post link clicks). |
-| `conversions` | number | Sign-ups. Falls back to `form_submissions + new_subscribers` if absent. |
+| `engagements` | number | Likes, comments, shares, and saves added up (or entered directly). |
+| `followers` | number | Running follower or subscriber total. |
+| `clicks` | number | Outbound or link clicks (Linktree taps, post link clicks). |
+| `conversions` | number | Sign-ups. Falls back to `form_submissions + new_subscribers` if missing. |
 
-Headers are **case-insensitive and order-independent**, and missing columns
-are read as `0`/blank rather than erroring. Recognized aliases per column:
+Column names can be in any order and any capitalization. Missing columns are
+read as `0` or blank rather than causing an error. Each column also accepts
+these alternate names:
 
-- `week` ← `week`, `week_start`, `date`, `reporting_week`, `week_of`
-- `channel` ← `channel`, `platform`, `source`, `network`
-- `reach` ← `reach`
-- `impressions` ← `impressions`, `impression`, `views`, `view`
-- `engagements` ← `engagements`, `engagement`, `total_engagements`
-- `followers` ← `followers`, `followers_total`, `subscribers_total`, `audience`, `subscribers`
-- `clicks` ← `clicks`, `link_clicks`, `linktree_clicks`, `total_clicks`, `taps`
-- `conversions` ← `conversions`; else the sum of `form_submissions`/`submissions`/`responses` and `new_subscribers`/`signups`/`sign_ups`
+- `week`: `week`, `week_start`, `date`, `reporting_week`, `week_of`
+- `channel`: `channel`, `platform`, `source`, `network`
+- `reach`: `reach`
+- `impressions`: `impressions`, `impression`, `views`, `view`
+- `engagements`: `engagements`, `engagement`, `total_engagements`
+- `followers`: `followers`, `followers_total`, `subscribers_total`, `audience`, `subscribers`
+- `clicks`: `clicks`, `link_clicks`, `linktree_clicks`, `total_clicks`, `taps`
+- `conversions`: `conversions`, otherwise the sum of `form_submissions`/`submissions`/`responses` and `new_subscribers`/`signups`/`sign_ups`
 
-Download a starter file from the app ("Download template CSV") or use
+You can download a starter file from the app ("Download template CSV") or use
 [`sample/comms_template.csv`](sample/comms_template.csv).
 
 ### Platform adapters
 
-Ship for: **Meta/Facebook Page Insights, Instagram Insights, LinkedIn Page
-Analytics, Linktree Analytics, and Mailchimp-style newsletter campaign
-exports.** These raw exports are usually daily or per-post — the matching
-adapter reshapes them to one row per channel per ISO week automatically:
-additive metrics (reach, impressions, engagements, clicks, conversions) sum
-across the week; `followers` (a running total, not a daily count) takes the
-**latest** value seen that week.
+There are adapters for Meta and Facebook Page Insights, Instagram Insights,
+LinkedIn Page Analytics, Linktree Analytics, and Mailchimp-style newsletter
+campaign exports. These raw exports are usually daily or per-post, and the
+matching adapter reshapes them to one row per channel per ISO week on its own.
+The metrics that add up (reach, impressions, engagements, clicks, conversions)
+are summed across the week. `followers`, which is a running total rather than a
+daily count, takes the latest value seen that week.
 
-**Known limitation:** some platforms only export follower *deltas*
-("new followers today") rather than a running total. Where that's the only
-column available, an adapter's `followers` output will read as that day's
-delta, not your actual audience size — there's no way to reconstruct a
-cumulative total from deltas alone without a starting baseline. If you hit
-this, either ignore the Followers column for that channel or track it
-separately until the export includes a snapshot total.
+A known limitation: some platforms only export follower changes ("new followers
+today") rather than a running total. Where that is the only column available,
+the adapter's `followers` figure will read as that day's change, not your real
+audience size. There is no way to rebuild a running total from daily changes
+alone without a starting number. If you run into this, either ignore the
+Followers column for that channel or track it on the side until the export
+includes a full total.
 
-Adapters are intentionally the most likely thing to break — a platform can
-change its export columns at any time. Each one is a small, self-contained
-block (detector + column map) inside `index.html`, marked
-`// ---------- Platform adapters ----------`. **To fix an adapter, edit its
-`aliasToField` (and `signature`, if the platform renamed a column you rely
-on for detection) in that one block — nothing else in the app needs to
-change.** Until it's fixed, files from that platform still work; they just
-fall to the manual-mapping step.
+Adapters are the part most likely to break, since a platform can rename its
+export columns at any time. Each adapter is a small self-contained block (a
+detector plus a column map) inside `index.html`, marked
+`// ---------- Platform adapters ----------`. To fix one, edit its
+`aliasToField` (and its `signature`, if the platform renamed a column you rely
+on to detect the file) in that one block. Nothing else in the app needs to
+change. Until you fix it, files from that platform still work, they just fall
+to the map-it-yourself step.
 
 ### Format Mix exports
 
-Meta/Instagram's **"Top content formats"** export answers a different
-question than everything else in this app: not *how is the audience
-growing*, but *which content formats earn attention*. It's handled
-separately from the funnel, on purpose:
+Meta and Instagram's "Top content formats" export answers a different question
+than the rest of the app: not how the audience is growing, but which content
+formats earn attention. It is handled on its own, on purpose:
 
-- It's usually **UTF-16 encoded**, with a `sep=,` hint line first — both
-  handled automatically (the app sniffs the byte-order-mark on every
-  non-Excel file and decodes accordingly, and strips the hint line before
-  parsing).
-- It isn't a single header-plus-rows grid — it's **three stacked
-  mini-tables** in one file (`Published content`, `Views`, `Content
-  interactions`, each a label row, a format-name row, then a values row).
-  The app recognizes this shape structurally and merges the three
-  sections into one record per format (Reels, Stories, Photo, …).
-- **It has no date column at all.** On import, you're asked to tag the
-  file with the week it covers (the same date-picker pattern as manual
-  mapping's week field). Re-tagging a file to a week you've already
-  loaded replaces that week's format mix rather than duplicating it, so
-  re-exporting the same period twice reconciles to one.
-- It never contains reach, followers, clicks, or sign-ups, so it **can
-  never feed the growth chart or funnel** — the app doesn't try. If it's
-  the only kind of file loaded, the Format Mix view says so explicitly
-  rather than leaving you to guess why the funnel looks empty.
+- It is usually UTF-16 encoded, with a `sep=,` hint line at the top. Both are
+  handled for you. The app checks the byte-order-mark on every non-Excel file
+  and reads it accordingly, and strips the hint line before parsing.
+- It is not one header row with data under it. It is three small tables stacked
+  in one file (`Published content`, `Views`, `Content interactions`, each with
+  a label row, a format-name row, then a values row). The app recognizes this
+  shape and combines the three sections into one record per format (Reels,
+  Stories, Photo, and so on).
+- It has no date column. When you import it, the app asks you to tag the file
+  with the week it covers (the same date picker used for the map-it-yourself
+  week field). Tagging a file to a week you have already loaded replaces that
+  week's format mix rather than adding a duplicate, so re-exporting the same
+  period twice settles to one.
+- It never contains reach, followers, clicks, or sign-ups, so it can never feed
+  the growth chart or funnel, and the app does not try. If it is the only kind
+  of file you have loaded, the Format Mix view says so plainly rather than
+  leaving you to wonder why the funnel is empty.
 
-See "Format Mix" under "What the dashboard shows" below for what the view
-itself contains.
+See "Format Mix" under "What the dashboard shows" for what the view itself
+contains.
 
 ### Funnel
 
-`Reach → Engagement → Clicks → Sign-ups`, summed across the selected channels
-for the selected week.
+Reach to Engagement to Clicks to Sign-ups, added up across the channels you have
+selected for the week you have selected.
 
-- **Click-through rate** = clicks ÷ reach
-- **Conversion rate** = sign-ups ÷ clicks
+- Click-through rate is clicks divided by reach.
+- Conversion rate is sign-ups divided by clicks.
 
-## Counts only — never PII
+## Counts only, never personal details
 
-**Only upload aggregate numbers.** This tool is built to handle "47 form
-submissions," never the 47 people who submitted them. Do not put
-respondent-level data — names, emails, free-text answers — into the file. If
-your source system (e.g. Google Forms) exports individual responses,
-aggregate them into a count before they ever reach this tool. The Google
-Sheet or intake form you already use remains the record of truth; this
-dashboard is a disposable, stateless read-out of it.
+Only upload totals. This tool is built to handle "47 form submissions," not the
+47 people who submitted them. Do not put person-level data (names, emails,
+free-text answers) into the file. If your source system (for example Google
+Forms) exports individual responses, turn them into a count before they reach
+this tool. The Google Sheet or intake form you already use stays the record of
+truth. This dashboard is a throwaway read-out of it.
 
-This holds on every ingestion path, not just the canonical schema.
-Adapters and the manual-mapping step only ever *copy* the specific columns
-mapped to a canonical field (reach, clicks, followers, etc.) into the
-dataset — a name or email column left unmapped is simply never read past
-detection; it's discarded with the rest of the file the moment parsing
-finishes. If a raw export is respondent-level (a Google Forms/Typeform
-response dump, say), map only the date/channel and leave every PII column
-unmapped — you'll end up with a per-week row count, not a name list. If the
-file has no natural count at all, aggregate it to counts in the source
-system first.
+This holds on every path in, not just the standard layout. Adapters and the
+map-it-yourself step only ever copy the specific columns you mapped to a field
+(reach, clicks, followers, and so on) into the data set. A name or email column
+you leave unmapped is never read past detection. It is thrown out with the rest
+of the file the moment parsing finishes. If a raw export is person-level (a
+Google Forms or Typeform response dump, say), map only the date and channel and
+leave every personal-detail column unmapped. You will end up with a per-week row
+count, not a list of names. If the file has no natural count at all, turn it
+into counts in the source system first.
 
-## Security & privacy model
+## Security and privacy
 
-- **100% client-side.** Parsing, computation, and rendering all happen in
-  your browser tab.
-- **No accounts, no auth.** There is nothing to sign into.
-- **No persistence.** Nothing is written to `localStorage`, `sessionStorage`,
-  IndexedDB, or cookies. A refresh clears all uploaded data back to the
-  sample dataset.
-- **No exfiltration path.** The only network requests the page makes are the
-  two library loads in CDN mode (none in offline mode). No analytics, no
-  telemetry, no `fetch`/XHR/WebSocket of your data, ever. Check your
-  browser's Network tab to confirm.
-- **A leaked link is safe.** Because there's nothing to sign into and
-  nothing stored, sharing the URL — even by accident — just hands someone a
-  blank tool with sample data. There's no dataset behind it to expose.
+- Everything happens in your browser tab: reading the files, doing the math,
+  and drawing the screen.
+- There are no accounts and no sign-in. There is nothing to log into.
+- Nothing is saved. Nothing is written to `localStorage`, `sessionStorage`,
+  IndexedDB, or cookies. A refresh clears everything you uploaded back to the
+  sample data.
+- There is no way for your data to leave. The only network requests the page
+  makes are the two library loads when it runs in the CDN version (and none in
+  the offline version). No analytics, no tracking, and no sending of your data,
+  ever. You can check your browser's Network tab to confirm.
+- A leaked link is harmless. Since there is nothing to log into and nothing
+  stored, sharing the URL by accident just hands someone a blank tool with
+  sample data. There is no data set behind it to expose.
 
-If you're extending this tool, preserve this model: **adding an account, a
-stored dataset, a server, or a "phone home" of any kind breaks the security
-model** and should be called out explicitly in review — it's the whole
-reason this exists instead of the previous Looker Studio setup.
+If you extend this tool, keep this model in place. Adding an account, a stored
+data set, a server, or any kind of phone-home breaks the privacy model and
+should be flagged in review. It is the whole reason this tool exists instead of
+the old Looker Studio setup.
 
 ## What the dashboard shows
 
-- **KPI tiles** — Reach, Engagement, Followers, Clicks, Sign-ups for the
-  selected week, each with a week-over-week delta.
-- **Growth chart** — one line per channel; switch the metric with the tabs
-  above the chart.
-- **Funnel** — the four-stage funnel for the selected week, with rates.
-- **Detail table** — per-channel numbers for the selected week, with totals.
-- **Filters** — toggle channels on/off (at least one stays selected) and
-  pick the reporting week; both apply to every view above.
+- KPI tiles: Reach, Engagement, Followers, Clicks, and Sign-ups for the week
+  you have selected, each with its change from the week before.
+- Growth chart: one line per channel. Switch the metric with the tabs above the
+  chart.
+- Funnel: the four-stage funnel for the selected week, with its rates.
+- Detail table: per-channel numbers for the selected week, with totals.
+- Filters: turn channels on and off (at least one stays on) and pick the week.
+  Both apply to every view above.
 
 ## Format Mix
 
-A companion view, kept deliberately separate from the funnel above, fed by
-Meta/Instagram "Top content formats" exports (see "Format Mix exports"
-under "Ingesting data"). Pick a **period** (the week the file was tagged
-with on import) and it shows, for that period:
+A companion view, kept separate from the funnel on purpose, fed by Meta and
+Instagram "Top content formats" exports (see "Format Mix exports" under "Adding
+your data"). Pick a period (the week the file was tagged with on import) and it
+shows, for that period:
 
-- **Views by format** — a sorted bar per format. The headline number.
-- **Views per post** — views ÷ published, sorted separately. This is the
-  efficiency signal: a format that earns a lot from very few posts stands
-  out here even if its raw view count doesn't top the chart above.
-- **Published count and interactions** per format, alongside views and
-  views/post, in one table.
-- **A one-line, rule-based insight** — e.g. "Reels earned 75% of views
-  from a small share of posts; Stories were published most but drew the
-  fewest views per post." Same spirit as the PDF interpretation: plain
-  arithmetic over the numbers already shown, not a causal claim.
-- **A share-of-views comparison across periods** (once 2+ are loaded) —
-  e.g. watching Reels' share of views move week to week.
+- Views by format: a sorted bar per format. The headline number.
+- Views per post: views divided by posts published, sorted on its own. This is
+  the efficiency signal. A format that earns a lot from very few posts stands
+  out here even if its raw view count does not top the chart above.
+- Published count and interactions per format, next to views and views per post,
+  in one table.
+- A one-line, rule-based note, for example "Reels earned 75% of views from a
+  small share of posts; Stories were published most but drew the fewest views
+  per post." Same idea as the PDF read: plain arithmetic over the numbers
+  already shown, not a claim about cause.
+- A share-of-views comparison across periods, once you have loaded two or more,
+  for example watching Reels' share of views move week to week.
 
-If no Format Mix file has been loaded, this card says so. If growth/funnel
-data (the sections above) isn't loaded — only a Format Mix file is — this
-card says that explicitly too, rather than leaving the empty funnel
-unexplained: **Format Mix numbers are never used to fill in or imply
-reach, followers, clicks, or sign-ups.** The two views only ever share a
-page, never data.
+If you have not loaded a Format Mix file, this card says so. If you have loaded
+only a Format Mix file and no growth or funnel data, this card says that too,
+rather than leaving the empty funnel unexplained. Format Mix numbers are never
+used to fill in or stand in for reach, followers, clicks, or sign-ups. The two
+views share a page, never data.
 
 ## PDF report
 
-"Download PDF report," next to the week selector, builds a one-to-two page
-PDF for the currently selected week and channel filter — same numbers as
-the screen, saved to a file (`pulse-report-YYYY-MM-DD.pdf`). Generated
-entirely client-side via a `Blob`; nothing is uploaded, no network request
-is made, and it works the same in the offline build. Contents, in order:
+"Download PDF report," next to the week selector, builds a one-to-two page PDF
+for the week and channel filter you are looking at, with the same numbers as the
+screen, saved to a file (`pulse-report-YYYY-MM-DD.pdf`). It is built entirely in
+the browser through a `Blob`. Nothing is uploaded and no network request is
+made, and it works the same in the offline version. It contains, in order:
 
-1. Title, the selected week, and the date the report was generated.
-2. The five KPIs with their week-over-week change.
-3. The funnel (Reach → Engagement → Clicks → Sign-ups) with the
-   click-through and conversion rates.
-4. The growth chart as an image (skipped with a text note if Chart.js
-   didn't load — the rest of the report is unaffected).
+1. A title, the selected week, and the date the report was made.
+2. The five KPIs with their change from the week before.
+3. The funnel (Reach to Engagement to Clicks to Sign-ups) with the click-through
+   and conversion rates.
+4. The growth chart as an image (skipped with a text note if Chart.js did not
+   load, and the rest of the report is unaffected).
 5. The per-channel detail table for the week.
-6. **"What this means"** — a short plain-language interpretation.
-7. A footer noting the report contains aggregate counts only.
+6. "What this means," a short plain-language read of the week.
+7. A footer noting that the report contains totals only.
 
-If the sample dataset is loaded, the report is stamped **SAMPLE DATA** so
-it's never mistaken for a real week's reporting.
+If the sample data is loaded, the report is stamped SAMPLE DATA so it is never
+mistaken for a real week's reporting.
 
-### About the interpretation
+### About the read
 
-The "What this means" section is **rule-based text computed from the
-numbers already in memory — not an AI call, not a causal analysis.** It
-states the week-over-week direction and size of reach/engagement/
-followers/sign-ups; names this week's funnel bottleneck (the stage with the
-weakest conversion rate *relative to the stage before it*, e.g. "clicks are
-healthy, but sign-ups lag"), with today's click-through and conversion
-rates against the trailing average of up to the prior 4 weeks; and names
-the top channel by reach, by engagement rate, and by sign-ups, flagging any
-channel with an unusually large week-over-week move. It always closes with
-a caveat that reach isn't de-duplicated across platforms and that these are
-observations, not explanations of *why* something moved.
+The "What this means" section is plain text worked out from the numbers already
+in memory. It is not an AI call and it does not try to explain cause. It states
+the direction and size of the week-over-week change in reach, engagement,
+followers, and sign-ups; names this week's funnel bottleneck (the stage with the
+weakest conversion rate compared with the stage before it, for example "clicks
+are healthy, but sign-ups lag"), with this week's click-through and conversion
+rates set against the average of up to the prior 4 weeks; and names the top
+channel by reach, by engagement rate, and by sign-ups, flagging any channel with
+an unusually large move from the week before. It always closes with a note that
+reach is not de-duplicated across platforms and that these are observations, not
+explanations of why something moved.
 
-It's deliberately simple and transparent on purpose: a non-analyst operator
-can read every sentence back to the arithmetic that produced it, and so can
-you. All of the rules and their tunable thresholds (how many weeks count as
-"short history," the trailing-average window, what counts as a "notable"
-move) live in one block in `index.html`, marked
+It is kept simple and clear on purpose. Someone who is not an analyst can read
+every sentence back to the arithmetic that produced it, and so can you. All of
+the rules and their adjustable thresholds (how many weeks count as "short
+history," the trailing-average window, what counts as a "notable" move) live in
+one block in `index.html`, marked
 `// ---------- Report interpretation rules (plain-language, rule-based) ----------`.
-To change the
-wording or a threshold, edit that block — nothing else in the app depends
-on it.
+To change the wording or a threshold, edit that block. Nothing else in the app
+depends on it.
 
-## Repository structure
+## Repository layout
 
 ```
 cdls-comms-pulse/
-├── index.html              # the app (CDN mode)
-├── index.offline.html      # the app with libraries inlined (zero network calls)
+├── index.html              # the app (CDN version)
+├── index.offline.html      # the app with libraries built in (no network calls)
 ├── scripts/
-│   └── build-offline.js    # regenerates index.offline.html from index.html
+│   └── build-offline.js    # rebuilds index.offline.html from index.html
 ├── sample/
-│   └── comms_template.csv  # canonical schema + example rows, downloadable in-app too
+│   └── comms_template.csv  # the standard layout with example rows, also downloadable in the app
 ├── README.md
 └── LICENSE                 # MIT
 ```
 
-## Out of scope (v1)
+## Not in this version
 
-Ad-spend/paid-campaign attribution, cross-platform de-duplicated unique
-reach, real-time API pulls, multi-user collaboration, saved history/audit
-trail, anything server-side. Your existing intake sheet or form remains the
-source of record; this tool is a stateless read-out of it.
+Ad-spend and paid-campaign attribution, cross-platform de-duplicated unique
+reach, live API pulls, more than one person working at once, saved history or an
+audit trail, and anything server-side. Your existing intake sheet or form stays
+the record of truth. This tool is a read-out of it that keeps nothing.
 
 ## License
 
-This project is MIT — see [LICENSE](LICENSE). Fork it, host it yourself,
-hand it to the next cohort. Bundled third-party libraries keep their own
-licenses (PapaParse, Chart.js, and jsPDF are MIT; SheetJS `xlsx` is
-Apache-2.0), noted above where each is pinned.
+This project is MIT, see [LICENSE](LICENSE). Fork it, host it yourself, hand it
+to the next cohort. The bundled libraries keep their own licenses (PapaParse,
+Chart.js, and jsPDF are MIT; SheetJS `xlsx` is Apache-2.0), noted above where
+each one is pinned.
